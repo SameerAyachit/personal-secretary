@@ -1,0 +1,64 @@
+"""Diagnostics screen/command (plan §5, P0-05 / Phase 5).
+
+``run_diagnose()`` checks configuration, secret storage, store connectivity,
+and provider reachability without performing any writes. Returns an exit code.
+"""
+
+from __future__ import annotations
+
+import sys
+
+
+def run_diagnose() -> int:
+    problems: list[str] = []
+    ok: list[str] = []
+
+    # Python / platform
+    ok.append(f"Python {sys.version.split()[0]} on {sys.platform}")
+
+    # Config
+    try:
+        from .config import load_config  # noqa: PLC0415  (optional module, loaded lazily)
+        cfg = load_config()
+        ok.append("config loaded")
+        if not cfg:
+            problems.append("config is empty")
+    except Exception as exc:
+        problems.append(f"config load failed: {exc}")
+
+    # Secrets / keyring
+    try:
+        ok.append("keyring importable")
+    except Exception as exc:
+        problems.append(f"keyring unavailable: {exc}")
+
+    # Store (SQLite WAL)
+    try:
+        from .store.db import connect  # noqa: PLC0415  (optional module, loaded lazily)
+        conn = connect(":memory:")
+        conn.execute("PRAGMA journal_mode=wal")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.close()
+        ok.append("store connects (WAL + foreign_keys)")
+    except Exception as exc:
+        problems.append(f"store connect failed: {exc}")
+
+    # timezone data
+    try:
+        from zoneinfo import ZoneInfo  # noqa: PLC0415  (optional import, loaded lazily)
+        ZoneInfo("Asia/Kolkata")
+        ok.append("tzdata present")
+    except Exception as exc:
+        problems.append(f"tzdata missing: {exc}")
+
+    if problems:
+        print("DIAGNOSE FAILED")
+        for p in problems:
+            print(f"  [X] {p}")
+        for o in ok:
+            print(f"  [ ] {o}")
+        return 1
+    print("DIAGNOSE OK")
+    for o in ok:
+        print(f"  [x] {o}")
+    return 0

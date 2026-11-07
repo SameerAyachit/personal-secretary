@@ -21,4 +21,9 @@ P0-03 eval harness + 40 cases + FakeLLM contract: tests/eval/{__init__,cases,har
 
 Next: P0-04 Qt shell spike (tray, window hide/show, single-instance, worker+asyncio, hotkey, popup card) — UI task, follows secretary-ui-design skill.
 
+P0-04 Qt shell spike DONE: src/secretary/app.py (QApplication, setQuitOnLastWindowClosed=False, single-instance QLocalServer, WorkerThread with asyncio loop), src/secretary/__main__.py (--minimized/--diagnose), src/secretary/ui/main_window.py (hide-on-close per C-3), src/secretary/notify/tray.py, src/secretary/notify/popup.py (frameless always-on-top bottom-right), src/secretary/hotkey.py (win32 RegisterHotKey behind import guard), src/secretary/logging_setup.py (JSON-lines + redaction), src/secretary/diagnose.py. Tests (worker thread, main window, popup) pass offscreen. ruff ✓, pytest ✓, lint-imports ✓.
+Pitfalls noted: QSystemTrayIcon lives in QtWidgets (PySide6 6.12), QAction in QtGui, QLocalServer in QtNetwork; win32 only via importlib guard; closeEvent must ignore+hide (C-3); WorkerThread.stop uses loop.call_soon_threadsafe(loop.stop) then wait().
+
+Next: P0-05 packaging smoke (PyInstaller + Inno) is HUMAN-GATED (clean profile). P0-06 Google OAuth HUMAN-GATED. P0-07 credential manager HUMAN-GATED. P0-08 UI toolkit ADR. Then Phase 1.
+
 
