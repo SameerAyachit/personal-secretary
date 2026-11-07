@@ -17,4 +17,8 @@ P0-02 LLM probe + provider decision: built llm/base.py, llm/errors.py, llm/opena
 
 Next: P0-03 eval harness (FakeLLM contract — this part is runnable by agent; live run human-gated).
 
+P0-03 eval harness + 40 cases + FakeLLM contract: tests/eval/{__init__,cases,harness,test_contract}. Report generated at docs/eval_results/2026-11-07_fakellm_contract.md (100% pass). ruff ✓, pytest ✓, lint-imports ✓. Live run against a real model needs a key → DONE-HUMAN-GATED (docs/human_todo.md P0-03/P1-09).
+
+Next: P0-04 Qt shell spike (tray, window hide/show, single-instance, worker+asyncio, hotkey, popup card) — UI task, follows secretary-ui-design skill.
+
 
