@@ -17,6 +17,7 @@ Pinned in `requirements.lock` (plan §4.1). Every entry here traces to a plan co
 | trafilatura | 2.3.1 | §4.1 Page text extraction | Research brief extraction |
 | google-api-python-client | 2.201.0 | §4.1 Google (optional) | Google Calendar / Gmail API |
 | google-auth-oauthlib | 1.5.0 | §4.1 Google (optional) | OAuth flow |
+| PyInstaller | 6.22.3 | §4.1 Packaging | One-folder Windows exe |
 | pytest, pytest-qt, pytest-asyncio, respx, time-machine, hypothesis | various | §4.1 Tests | Test suite |
 | ruff, mypy, import-linter, pre-commit | various | §4.1 Quality | Lint, types, import layering, pre-commit |
 

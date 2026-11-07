@@ -22,8 +22,14 @@ P0-03 eval harness + 40 cases + FakeLLM contract: tests/eval/{__init__,cases,har
 Next: P0-04 Qt shell spike (tray, window hide/show, single-instance, worker+asyncio, hotkey, popup card) — UI task, follows secretary-ui-design skill.
 
 P0-04 Qt shell spike DONE: src/secretary/app.py (QApplication, setQuitOnLastWindowClosed=False, single-instance QLocalServer, WorkerThread with asyncio loop), src/secretary/__main__.py (--minimized/--diagnose), src/secretary/ui/main_window.py (hide-on-close per C-3), src/secretary/notify/tray.py, src/secretary/notify/popup.py (frameless always-on-top bottom-right), src/secretary/hotkey.py (win32 RegisterHotKey behind import guard), src/secretary/logging_setup.py (JSON-lines + redaction), src/secretary/diagnose.py. Tests (worker thread, main window, popup) pass offscreen. ruff ✓, pytest ✓, lint-imports ✓.
-Pitfalls noted: QSystemTrayIcon lives in QtWidgets (PySide6 6.12), QAction in QtGui, QLocalServer in QtNetwork; win32 only via importlib guard; closeEvent must ignore+hide (C-3); WorkerThread.stop uses loop.call_soon_threadsafe(loop.stop) then wait().
+Pitfalls: QSystemTrayIcon in QtWidgets, QAction in QtGui, QLocalServer in QtNetwork (PySide6 6.12); win32 via importlib guard; closeEvent ignores+hides (C-3); WorkerThread.stop uses call_soon_threadsafe(loop.stop) then wait().
 
-Next: P0-05 packaging smoke (PyInstaller + Inno) is HUMAN-GATED (clean profile). P0-06 Google OAuth HUMAN-GATED. P0-07 credential manager HUMAN-GATED. P0-08 UI toolkit ADR. Then Phase 1.
+P0-05 packaging smoke DONE-HUMAN-GATED: packaging/secretary.spec (PyInstaller one-folder, tzdata + vendored cl100k_base + migrations + theme data), packaging/version_info.txt, packaging/installer.iss (HKCU Run key autostart per Appendix E). `pyinstaller packaging/secretary.spec` builds dist/secretary/secretary.exe (55 MB) and it runs --diagnose without crashing. Clean-profile install, toast from packaged exe with AUMID shortcut, Run-key autostart, full --diagnose pass need a human on a clean profile → DONE-HUMAN-GATED (docs/human_todo.md P0-05).
+
+P0-06 Google OAuth HUMAN-GATED (real Google Cloud project + credentials.json needed).
+P0-07 Credential Manager in packaged exe HUMAN-GATED.
+P0-08 UI toolkit ADR DONE (docs/adr/ADR-002.md — Qt Widgets confirmed; P0-04 shell is the prototype).
+
+Next: Phase 1 core (P1-01 paths/config/secrets/logging; P1-02 store; P1-03 timeparse; ...).
 
 

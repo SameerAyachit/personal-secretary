@@ -85,4 +85,8 @@ tzlocal==5.4.5
 uritemplate==4.2.0
 urllib3==2.8.0
 virtualenv==21.15.6
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+pefile==2024.8.26
+altgraph==0.17.5
 winrt-runtime==4.1.0
