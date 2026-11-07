@@ -32,4 +32,7 @@ P0-08 UI toolkit ADR DONE (docs/adr/ADR-002.md — Qt Widgets confirmed; P0-04 s
 
 Next: Phase 1 core (P1-01 paths/config/secrets/logging; P1-02 store; P1-03 timeparse; ...).
 
+P1-01 DONE: src/secretary/paths.py (data_root via SECRETARY_DATA_ROOT, LOCALAPPDATA fallback), src/secretary/config.py (pydantic Config model + load_config merging config.toml with Appendix A defaults), src/secretary/secrets.py (keyring get/set/delete), src/secretary/logging_setup.py (JSON-lines + redaction, done earlier). Tests: tests/unit/config/{test_paths,test_config}, tests/unit/secrets/test_secrets (8 tests). ruff ✓, pytest ✓, lint-imports ✓.
+
+
 
