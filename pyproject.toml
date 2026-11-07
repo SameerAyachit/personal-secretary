@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secretary"
+version = "0.1.0"
+description = "Native Windows personal secretary desktop app (PySide6 + SQLite + OpenAI-compatible LLM)"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Sameer Ayachit" }]
+dependencies = [
+    "PySide6>=6.5,<7",
+    "httpx>=0.27,<1",
+    "dateparser>=1.5,<2",
+    "python-dateutil>=2.8,<3",
+    "tzdata>=2024,<2027",
+    "tiktoken>=0.5,<1",
+    "keyring>=24,<27",
+    "desktop-notifier>=5,<7",
+    "pydantic>=2.0,<3",
+    "ddgs>=9,<10",
+    "trafilatura>=2,<3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8,<10",
+    "pytest-qt>=4,<5",
+    "pytest-asyncio>=0.23,<2",
+    "respx>=0.20,<1",
+    "time-machine>=2,<4",
+    "hypothesis>=6,<7",
+]
+quality = [
+    "ruff>=0.8,<1",
+    "mypy>=1.11,<3",
+    "import-linter>=2,<3",
+    "pre-commit>=3,<5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "ui: tests that exercise the Qt UI (run with QT_QPA_PLATFORM=offscreen)",
+]
+addopts = ["-q"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "PLC", "PLE", "PLW", "RET", "RUF", "SIM", "TCH", "TRY"]
+ignore = ["E501", "B008", "B018", "C408", "UP007", "UP008", "PLR0913", "PLR0915", "PLR2004", "SIM108", "SIM114", "TRY300", "TRY301"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["secretary"]
+
+[tool.mypy]
+python_version = 3.12
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+disallow_any_generics = false
+ignore_missing_imports = true
+follow_imports = "silent"
+plugins = ["pydantic.mypy"]
+
