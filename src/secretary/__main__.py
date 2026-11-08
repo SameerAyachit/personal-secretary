@@ -20,6 +20,7 @@ from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
+from secretary.tools import planning as planning_tools
 from secretary.tools import registry as tools_registry
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         tasks_tools.register(registry)
         email_tools.register(registry)
         events_tools.register(registry)
+        planning_tools.register(registry)
         router = Router(registry)
         router.route("tasks_add", ["task", "create", "add", "remind"])
         router.route("tasks_list", ["task", "list", "show", "remind"])
@@ -76,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         router.route("web_search", ["search", "web"])
         router.route("event_create", ["event", "calendar", "meeting", "appointment"])
         router.route("event_list", ["events", "calendar", "schedule", "agenda"])
+        router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
 
         # LLM provider, limiter.
         llm = None

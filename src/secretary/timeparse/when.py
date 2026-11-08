@@ -84,3 +84,22 @@ def resolve_when(text: str, now: datetime, tz: str) -> datetime:
     if dt <= now:
         raise PastTime(text, dt)
     return dt
+
+
+def resolve_date(text: str, now: datetime, tz: str):
+    """Resolve ``text`` to a calendar date in zone ``tz``.
+
+    Same parsing as :func:`resolve_when` but returns only the date and does not
+    reject past dates (planning may target any day).
+    """
+    zone = ZoneInfo(tz)
+    dt = _parse(text, now, tz)
+    if dt is None:
+        dt = _parse(normalize_text(text), now, tz)
+    if dt is None:
+        raise AmbiguousTime(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=zone)
+    else:
+        dt = dt.astimezone(zone)
+    return dt.date()
