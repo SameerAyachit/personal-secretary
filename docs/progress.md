@@ -50,5 +50,15 @@ Next: P1-07 agent loop with guards and normalize_response (plan §8.1).
 
 P1-07 DONE: src/secretary/agent/loop.py (run_turn with MAX_STEPS=5 guard, token budget via limiter, identical-call dedupe, cross-step loop detection, timeout), src/secretary/agent/normalize_response.py (Appendix C cases: JSON in content, fenced JSON, args-as-string, unknown tools dropped, duplicates deduped, trailing prose, empty content). Tests: tests/unit/agent/{test_loop,test_normalize_response} (12 tests). ruff ✓, pytest ✓ (118 tests total), lint-imports ✓ (7 kept, 0 broken).
 
-Next: P1-08 Controller facade + Chat and Tasks views with manual quick-add working without the LLM (pytest-qt).
+### Phase 1 gate (plan §21 / protocol §5) — all green
+- ruff check . ✓ (All checks passed)
+- python -m pytest -q ✓ (118 tests passed)
+- lint-imports ✓ (7 kept, 0 broken)
+- python -m secretary --diagnose ✓ (DIAGNOSE OK: Python, config, keyring, store WAL+foreign_keys, tzdata)
+- Packaging smoke ✓ (P0-05: PyInstaller one-folder dist/secretary/secretary.exe builds and runs)
+- Eval re-run vs FakeLLM ✓ (docs/eval_results/2026-11-07_fakellm_contract.md, 100%)
+- ADRs current (ADR-001 D1-D15, ADR-002 UI toolkit), CHANGELOG.md added, progress.md current
+- Self-review ✓ (layering via import-linter; class C → pending_actions; untrusted text tool-less; no absolute timestamps from LLM; redaction filter)
+
+Next: P1-08 Controller facade + Chat and Tasks views with manual quick-add working without the LLM (pytest-qt). Then Phase 2 (reminders/inbox/native shell).
 

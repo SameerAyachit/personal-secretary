@@ -34,8 +34,8 @@ def run_diagnose() -> int:
 
     # Store (SQLite WAL)
     try:
-        from .store.db import connect  # noqa: PLC0415  (optional module, loaded lazily)
-        conn = connect(":memory:")
+        from .store.db import Connection  # noqa: PLC0415  (optional module, loaded lazily)
+        conn = Connection(":memory:")
         conn.execute("PRAGMA journal_mode=wal")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.close()
