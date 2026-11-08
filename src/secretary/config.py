@@ -7,7 +7,7 @@ Limits are config, never code constants. Unknown limits are ``0`` meaning
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path  # noqa: TC003  (used at runtime for cfg_path.open)
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict

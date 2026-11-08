@@ -34,5 +34,7 @@ Next: Phase 1 core (P1-01 paths/config/secrets/logging; P1-02 store; P1-03 timep
 
 P1-01 DONE: src/secretary/paths.py (data_root via SECRETARY_DATA_ROOT, LOCALAPPDATA fallback), src/secretary/config.py (pydantic Config model + load_config merging config.toml with Appendix A defaults), src/secretary/secrets.py (keyring get/set/delete), src/secretary/logging_setup.py (JSON-lines + redaction, done earlier). Tests: tests/unit/config/{test_paths,test_config}, tests/unit/secrets/test_secrets (8 tests). ruff ✓, pytest ✓, lint-imports ✓.
 
+P1-02 DONE: src/secretary/store/migrate.py (forward-only runner with schema_migrations tracking, exact plan §5.2 code), migrations/001_core..004_fts.sql (tasks, reminders, reminder_runs, events, facts, settings, inbox, pending_actions, action_log, conversations, messages, llm_usage, search_cache, search_idx FTS5 + triggers), src/secretary/store/db.py (Connection with WAL pragmas + RLock writer, FTS5 startup check), src/secretary/store/backup.py (online backup API, backup_if_due, prune, restore), src/secretary/store/repos/ (tasks, reminders, inbox, pending_actions, action_log, events, facts, conversations, llm_usage, settings, _base). Tests: tests/unit/store/{test_migrate,test_backup} (5 tests). Fixes: migrations_folder() now points to repo-root migrations/; backup() returns dst. ruff ✓ (26 tests total), pytest ✓, lint-imports ✓ (7 kept, 0 broken).
 
+Next: P1-03 timeparse (resolve_when, synonyms, formatter) — tests first, per plan §9.
 
