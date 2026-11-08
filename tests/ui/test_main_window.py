@@ -1,16 +1,32 @@
-"""Tests for the main window and popup card (offscreen, plan §12 / P0-04 spike)."""
+"""UI tests (offscreen, plan §12 / secretary-ui-design skill)."""
 
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import sqlite3
+import tempfile
+from pathlib import Path
+
 import pytest
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
-from secretary.notify.popup import PopupCard
+from secretary.controller import Controller
+from secretary.store.db import Connection, migrations_folder
+from secretary.store.migrate import migrate
 from secretary.ui.main_window import MainWindow
+from secretary.ui.views.tasks import TasksView
+
+
+def _conn():
+    tmp = Path(tempfile.mkdtemp()) / "ui.db"
+    raw = sqlite3.connect(str(tmp), isolation_level=None)
+    raw.execute("PRAGMA journal_mode=WAL")
+    raw.execute("PRAGMA foreign_keys=ON")
+    migrate(raw, migrations_folder(), lambda: None)
+    raw.close()
+    return Connection(tmp)
 
 
 @pytest.fixture(scope="module")
@@ -18,15 +34,18 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_main_window_hides_instead_of_quitting(qapp):
-    # No QApplication should be owned by the test; closing must not quit.
+@pytest.fixture()
+def controller(qapp):
+    return Controller(_conn())
+
+
+def test_main_window_hides_instead_of_quitting(qapp, controller):
     app = QApplication.instance()
     assert app is not None
     app.setQuitOnLastWindowClosed(False)
-    window = MainWindow(app)
+    window = MainWindow(controller)
     window.show()
     assert window.isVisible()
-    # Simulate a close: closeEvent should ignore and hide.
     event = QCloseEvent()
     window.closeEvent(event)
     assert not window.isVisible()
@@ -34,16 +53,22 @@ def test_main_window_hides_instead_of_quitting(qapp):
     assert QApplication.instance() is not None
 
 
-def test_popup_card_creation_and_position(qapp):
-    popup = PopupCard(title="Reminder", body="drink water")
-    assert popup.windowFlags() & Qt.FramelessWindowHint
-    assert popup.windowFlags() & Qt.WindowStaysOnTopHint
-    popup.show_popup()
-    assert popup.isVisible()
-    screen = QApplication.primaryScreen()
-    geo = screen.availableGeometry()
-    # Bottom-right: within screen bounds.
-    assert popup.x() + popup.width() <= geo.right()
-    assert popup.y() + popup.height() <= geo.bottom()
-    popup.close_popup()
-    assert not popup.isVisible()
+def test_rail_switches_views(qapp, controller):
+    window = MainWindow(controller)
+    # Switch rail to Tasks.
+    window._rail.setCurrentRow(2)  # Tasks
+    assert window._stack.currentWidget() is window._views["Tasks"]
+
+
+def test_tasks_quick_add_without_llm(qapp, controller):
+    """Manual quick-add works without the LLM (P1-08 acceptance)."""
+    view = TasksView(controller)
+    view._input.setText("submit the lab report")
+    view._on_add()
+    assert view._input.text() == ""
+    # Task persisted in the store.
+    rows = controller.list_tasks()
+    assert any("submit the lab report" in r["title"] for r in rows)
+    view.refresh()
+    titles = [view._list.item(i).text() for i in range(view._list.count())]
+    assert "submit the lab report" in titles

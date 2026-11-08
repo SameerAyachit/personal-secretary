@@ -1,19 +1,78 @@
-"""Main window: hide/show, minimize-to-tray, never exit on close (plan §3.1, C-3)."""
+"""Main window: left-rail navigation + stacked content, hide-to-tray (plan §12.1, C-3)."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QStackedWidget,
+    QWidget,
+)
+
+from secretary.controller import Controller
+from secretary.ui.theme import apply_theme
+from secretary.ui.views import chat, settings, tasks, today
 
 
 class MainWindow(QMainWindow):
-    """The single Secretary window. Closing hides it; tray Quit is the only exit."""
+    """Single Secretary window. Closing hides to tray; tray Quit is the only exit."""
 
-    def __init__(self, app) -> None:
+    def __init__(self, controller: Controller) -> None:
         super().__init__()
-        self._app = app
+        self._controller = controller
         self.setWindowTitle("Secretary")
         self.setMinimumSize(900, 600)
+
+        # Apply the light theme (dark/system switch wired in Settings, Phase 2).
+        apply_theme(self, "light")
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Left rail.
+        self._rail = QListWidget()
+        self._rail.setFixedWidth(200)
+        self._rail.setFrameStyle(0)  # no frame
+        for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Approvals", "Settings"):
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, label)
+            self._rail.addItem(item)
+        self._rail.setCurrentRow(0)
+        self._rail.currentItemChanged.connect(self._on_rail_changed)
+        root.addWidget(self._rail)
+
+        # Content area.
+        self._stack = QStackedWidget()
+
+        self._views = {
+            "Today": today.TodayView(),
+            "Chat": chat.ChatView(controller),
+            "Tasks": tasks.TasksView(controller),
+            "Calendar": QWidget(),
+            "Inbox": QWidget(),
+            "Approvals": QWidget(),
+            "Settings": settings.SettingsView(),
+        }
+        for view in self._views.values():
+            self._stack.addWidget(view)
+        root.addWidget(self._stack)
+
+        self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
+        self._controller.inbox_changed.connect(lambda: None)
+
+    def _on_rail_changed(self, item: QListWidgetItem) -> None:
+        if item is None:
+            return
+        label = item.data(Qt.UserRole)
+        view = self._views.get(label)
+        if view is not None:
+            self._stack.setCurrentWidget(view)
 
     def hide_to_tray(self) -> None:
         self.hide()

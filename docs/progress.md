@@ -62,3 +62,7 @@ P1-07 DONE: src/secretary/agent/loop.py (run_turn with MAX_STEPS=5 guard, token 
 
 Next: P1-08 Controller facade + Chat and Tasks views with manual quick-add working without the LLM (pytest-qt). Then Phase 2 (reminders/inbox/native shell).
 
+P1-08 DONE: src/secretary/ui/theme/tokens.py (design tokens, light/dark palettes), src/secretary/ui/theme/qss.py (QSS generated from tokens), src/secretary/ui/main_window.py (left rail + QStackedWidget, hide-to-tray C-3, theme applied), src/secretary/ui/views/{chat,tasks,today,settings}.py, src/secretary/controller/__init__.py (Controller facade with signals/slots: create_task_manual, send_message, ack/snooze_inbox, approve/reject_action, create_reminder_manual, list_tasks). TasksView manual quick-add works without the LLM and persists to the store. Tests: tests/ui/test_main_window.py (hide-on-close, rail switching, quick-add). ruff ✓, pytest ✓ (126 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: Phase 2 (reminders/inbox/native shell: P2-01 scheduler, P2-02 inbox model/view, P2-03 notifier layers, ...).
+

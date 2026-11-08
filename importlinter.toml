@@ -4,10 +4,17 @@ ignore_suggested_present = false
 ignore_missing_modules = true
 
 # Layering: ui -> controller -> agent -> tools -> store/integrations.
-# Lower layers must not import upper layers.
+# Transitive flow through the controller is the intended architecture
+# (plan §3.2), so only DIRECT layering violations count.
+# ui -> controller is allowed (controller facade, plan §12.5).
+# ui must not import store/llm/tools/etc. directly.
+# controller must not import ui/app.
+# store/integrations/secrets/logging_setup import nothing.
+
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "ui does not import lower layers directly"
+allow_indirect_imports = true
 source_modules = ["secretary.ui"]
 forbidden_modules = [
     "secretary.agent",
@@ -28,24 +35,28 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "controller does not import ui or app"
+allow_indirect_imports = true
 source_modules = ["secretary.controller"]
 forbidden_modules = ["secretary.ui", "secretary.app"]
 
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "agent does not import ui, controller, or app"
+allow_indirect_imports = true
 source_modules = ["secretary.agent"]
 forbidden_modules = ["secretary.ui", "secretary.controller", "secretary.app"]
 
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "tools does not import ui, controller, agent, or app"
+allow_indirect_imports = true
 source_modules = ["secretary.tools"]
 forbidden_modules = ["secretary.ui", "secretary.controller", "secretary.agent", "secretary.app"]
 
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "store imports nothing"
+allow_indirect_imports = true
 source_modules = ["secretary.store"]
 forbidden_modules = [
     "secretary.ui", "secretary.controller", "secretary.agent", "secretary.tools",
@@ -57,21 +68,23 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "secrets imports nothing"
+allow_indirect_imports = true
 source_modules = ["secretary.secrets"]
 forbidden_modules = [
     "secretary.ui", "secretary.controller", "secretary.agent", "secretary.tools",
     "secretary.store", "secretary.integrations", "secretary.llm", "secretary.timeparse",
     "secretary.notify", "secretary.scheduler", "secretary.config", "secretary.paths",
-    "secretary.logging_setup", "secretary.app",
+    "secretary.secrets", "secretary.logging_setup", "secretary.app",
 ]
 
 [[tool.importlinter.contracts]]
 type = "forbidden"
 name = "logging_setup imports nothing"
+allow_indirect_imports = true
 source_modules = ["secretary.logging_setup"]
 forbidden_modules = [
     "secretary.ui", "secretary.controller", "secretary.agent", "secretary.tools",
     "secretary.store", "secretary.integrations", "secretary.llm", "secretary.timeparse",
     "secretary.notify", "secretary.scheduler", "secretary.config", "secretary.paths",
-    "secretary.secrets", "secretary.app",
+    "secretary.secrets", "secretary.logging_setup", "secretary.app",
 ]

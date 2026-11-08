@@ -12,8 +12,12 @@ import argparse
 import sys
 
 from .app import create_app
+from .controller import Controller
 from .diagnose import run_diagnose
 from .logging_setup import setup_logging
+from .paths import db_path
+from .store.db import Connection, migrations_folder
+from .store.migrate import migrate
 from .ui.main_window import MainWindow
 
 
@@ -40,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
 
     app.start_worker()
     try:
-        window = MainWindow(app)
+        conn = Connection(db_path())
+        migrate(conn._con, migrations_folder(), lambda: None)
+        controller = Controller(conn)
+        window = MainWindow(controller)
         if args.minimized:
             window.hide_to_tray()
         else:
