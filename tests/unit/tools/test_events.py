@@ -1,0 +1,85 @@
+"""Tests for calendar event tools (plan §8.5, §13).
+
+event_create is class B (own event, no attendees): it resolves the user's
+``when_text`` in code and persists through ``events_repo``.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import tempfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from secretary.store.db import Connection, migrations_folder
+from secretary.store.migrate import migrate
+from secretary.store.repos import events as events_repo
+from secretary.timeparse.when import PastTime
+from secretary.tools.events import event_create, event_list
+
+
+def _conn():
+    tmp = Path(tempfile.mkdtemp()) / "e.db"
+    con = sqlite3.connect(str(tmp), isolation_level=None)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA foreign_keys=ON")
+    migrate(con, migrations_folder(), lambda: None)
+    return Connection(tmp)
+
+
+def _future_window(days: int = 7):
+    now = datetime.now(UTC)
+    return now.isoformat(), (now + timedelta(days=days)).isoformat()
+
+
+def test_event_create_persists_in_store():
+    conn = _conn()
+    try:
+        result = event_create(
+            conn,
+            "turn-1",
+            {
+                "title": "team standup",
+                "when_text": "tomorrow 09:00",
+                "duration_text": "30 minutes",
+                "tz": "Asia/Kolkata",
+            },
+        )
+        assert "event_id" in result
+        assert result["title"] == "team standup"
+        start, end = _future_window()
+        rows = events_repo.list_window(conn, start_at=start, end_at=end)
+        assert any(r["title"] == "team standup" for r in rows)
+    finally:
+        conn.close()
+
+
+def test_event_create_past_time_raises():
+    conn = _conn()
+    try:
+        with pytest.raises(PastTime):
+            event_create(
+                conn,
+                "turn-1",
+                {"title": "late meeting", "when_text": "yesterday 09:00", "tz": "Asia/Kolkata"},
+            )
+    finally:
+        conn.close()
+
+
+def test_event_list_returns_created_events():
+    conn = _conn()
+    try:
+        event_create(
+            conn, "turn-1", {"title": "standup", "when_text": "tomorrow 09:00", "tz": "Asia/Kolkata"}
+        )
+        event_create(
+            conn, "turn-1", {"title": "review", "when_text": "tomorrow 14:00", "tz": "Asia/Kolkata"}
+        )
+        result = event_list(conn, "turn-1", {"filter": "week"})
+        titles = {e["title"] for e in result["events"]}
+        assert titles == {"standup", "review"}
+    finally:
+        conn.close()

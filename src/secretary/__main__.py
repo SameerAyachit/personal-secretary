@@ -19,6 +19,7 @@ from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchPro
 from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.tools import email as email_tools
+from secretary.tools import events as events_tools
 from secretary.tools import registry as tools_registry
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
@@ -66,12 +67,15 @@ def main(argv: list[str] | None = None) -> int:
         registry = tools_registry.Registry()
         tasks_tools.register(registry)
         email_tools.register(registry)
+        events_tools.register(registry)
         router = Router(registry)
         router.route("tasks_add", ["task", "create", "add", "remind"])
         router.route("tasks_list", ["task", "list", "show", "remind"])
         router.route("reminders_add", ["remind", "reminder"])
         router.route("email_send", ["send", "email"])
         router.route("web_search", ["search", "web"])
+        router.route("event_create", ["event", "calendar", "meeting", "appointment"])
+        router.route("event_list", ["events", "calendar", "schedule", "agenda"])
 
         # LLM provider, limiter.
         llm = None
