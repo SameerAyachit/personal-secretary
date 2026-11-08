@@ -21,3 +21,5 @@ Thumbs.db
 .vscode/
 src/secretary.egg-info/
 *.egg-info/
+# tiktoken runtime cache (regenerated on load); only the vendored cl100k_base.tiktoken source is tracked
+src/secretary/llm/vendor/*

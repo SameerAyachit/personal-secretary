@@ -40,5 +40,7 @@ P1-03 DONE: src/secretary/timeparse/when.py (resolve_when with dateparser, DMY o
 
 P1-04 DONE: src/secretary/timeparse/recurrence.py (grammar parser parse_recurrence → RecurrenceRule; next_occurrence via dateutil.rrule/wall-clock + month-end clamp to last day of shorter months; UnparseableRecurrence). Tests: tests/unit/timeparse/test_recurrence.py (16 unit + hypothesis property tests: daily always-after, weekdays-is-weekday). ruff ✓, pytest ✓ (64 tests total), lint-imports ✓ (7 kept, 0 broken).
 
-Next: P1-05 LLM limiter + tokens (vendored cl100k_base encoding, TIKTOKEN_CACHE_DIR, RequestTooLarge, token-bucket reconcile). LLM client/FakeLLM/errors already built in P0-02.
+P1-05 DONE: src/secretary/llm/limiter.py (token-bucket rpm+tpm, RequestTooLarge when est exceeds bucket, reconcile from usage/headers), src/secretary/llm/tokens.py (vendored cl100k_base via TIKTOKEN_CACHE_DIR, chars/3 fallback), plus .gitignore rule for the regenerated tiktoken cache artifact. Tests: tests/unit/llm/test_limiter.py + tests/unit/llm/test_tokens.py. ruff ✓, pytest ✓ (92 tests total), lint-imports ✓ (7 kept, 0 broken).
+
+Next: P1-06 tool registry, routing, safety classes, idempotency, undo (plan §8).
 
