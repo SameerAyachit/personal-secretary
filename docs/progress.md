@@ -72,13 +72,11 @@ P2-02 DONE: src/secretary/ui/views/inbox.py (Inbox view with per-item Ack/Snooze
 
 P2-03 DONE: src/secretary/notify/notifier.py (toast via desktop-notifier best-effort, QSystemTrayIcon.showMessage fallback, popup card, tray badge; all wrapped in try/except + logging so a notifier failure never crashes the app or loses the inbox row). Tests: tests/notifier/test_notifier.py (toast sent, desktop failure still shows popup, no desktop -> popup, tray badge). ruff ✓, pytest ✓ (145 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
-Next: P2-04 catch-up on start/wake (group missed reminders into one "While you were away" inbox entry).
-
-P2-04 DONE: src/secretary/scheduler/catchup.py (catch_up() groups missed reminders into one "While you were away" inbox entry; recurring reminders advanced to next future occurrence; those older than 24 h logged as missed and skipped; sweeper run). Tests: tests/scheduler/test_catchup.py (20 missed -> 1 entry, recurring advances, no-due case). ruff ✓, pytest ✓ (148 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
-
 P2-04 DONE: src/secretary/scheduler/catchup.py (catch_up() groups missed reminders into one "While you were away" inbox entry; recurring reminders advanced to next future occurrence; those older than 24 h logged as missed and skipped; sweeper run). Tests: tests/scheduler/test_catchup.py (20 missed -> 1 entry, recurring advances, no-due case). ruff ✓, pytest ✓ (148 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
 P2-05 DONE: src/secretary/ui/views/today.py (Today view: unacknowledged reminders top with Snooze/Done, quick-add field, Plan my day, "While you were away" card), src/secretary/ui/views/approvals.py (Approvals view shell: waiting class-C actions with Approve/Reject), controller gains list_pending_actions(), sweeper runs each scheduler tick. Tests: tests/ui/test_inbox.py extended. ruff ✓, pytest ✓ (151 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
-Next: P2-06 Quick-capture hotkey and tray menu.
+P2-06 DONE: src/secretary/hotkey.py (HotkeyFilter native event filter for WM_HOTKEY), src/secretary/ui/quick_capture.py (centered quick-capture input, Enter sends, Esc closes), src/secretary/__main__.py (wires global hotkey Ctrl+Alt+Space + quick capture). ruff ✓, pytest ✓ (153 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-07 First-run wizard with Test connection.
 

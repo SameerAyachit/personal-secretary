@@ -7,11 +7,23 @@ than silently failing (plan §20.5, C-7).
 
 from __future__ import annotations
 
+import ctypes
 import importlib
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from ctypes import wintypes
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from PySide6.QtCore import QAbstractNativeEventFilter
+
+
+class MSG(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", wintypes.HWND),
+        ("message", wintypes.UINT),
+        ("wParam", wintypes.WPARAM),
+        ("lParam", wintypes.LPARAM),
+        ("time", wintypes.DWORD),
+        ("pt", wintypes.POINT),
+    ]
 
 
 class HotkeyError(Exception):
@@ -70,3 +82,23 @@ class GlobalHotkey:
             self._callback()
             return True
         return False
+
+
+class HotkeyFilter(QAbstractNativeEventFilter):
+    """Qt native event filter that forwards WM_HOTKEY messages to a GlobalHotkey."""
+
+    def __init__(self, hotkey: GlobalHotkey, callback: Callable[[], None]) -> None:
+        super().__init__()
+        self._hotkey = hotkey
+        self._callback = callback
+
+    def nativeEventFilter(self, eventType, message):  # type: ignore[override]
+        if eventType == b"windows_generic_MSG":
+            msg = ctypes.cast(int(message), ctypes.POINTER(MSG)).contents
+            if msg.message == 0x0312 and self._hotkey.check_message(
+                msg.hwnd, msg.message, msg.wParam, msg.lParam
+            ):
+                self._callback()
+                return True
+        return False
+

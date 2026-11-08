@@ -11,6 +11,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from secretary.hotkey import GlobalHotkey, HotkeyFilter
+from secretary.ui.quick_capture import QuickCapture
+
 from .app import create_app
 from .controller import Controller
 from .diagnose import run_diagnose
@@ -48,6 +51,14 @@ def main(argv: list[str] | None = None) -> int:
         migrate(conn._con, migrations_folder(), lambda: None)
         controller = Controller(conn)
         window = MainWindow(controller)
+
+        # Global hotkey for quick capture (Ctrl+Alt+Space).
+        quick_capture = QuickCapture(controller)
+        hotkey = GlobalHotkey(0x0003, 0x20, quick_capture.show_window)
+        hotkey_filter = HotkeyFilter(hotkey, quick_capture.show_window)
+        app.app.installNativeEventFilter(hotkey_filter)
+
+        window.quick_capture = quick_capture
         if args.minimized:
             window.hide_to_tray()
         else:
