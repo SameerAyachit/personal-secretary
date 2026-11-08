@@ -66,3 +66,7 @@ P1-08 DONE: src/secretary/ui/theme/tokens.py (design tokens, light/dark palettes
 
 Next: Phase 2 (reminders/inbox/native shell: P2-01 scheduler, P2-02 inbox model/view, P2-03 notifier layers, ...).
 
+P2-01 DONE: src/secretary/scheduler/ticker.py (SchedulerThread with 30s tick on its own QThread; atomic fire via claim status='firing', reminder_runs + inbox + next-occurrence advance; duplicate guard via UNIQUE(reminder_id, scheduled_for) + IntegrityError skip; repeat alerts, snooze expiry, sweeper all per-tick steps isolated so one failure never stops another). Tests: tests/scheduler/test_ticker.py (4 tests: fire creates inbox+marks done, duplicate prevented, recurring advances, tick runs). ruff ✓, pytest ✓ (134 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-02 inbox model/view with snooze/ack/done status transitions.
+

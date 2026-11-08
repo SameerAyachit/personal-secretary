@@ -37,6 +37,7 @@ class Connection:
     def __init__(self, path: Path, readonly: bool = False):
         self._path = path
         self._con = sqlite3.connect(str(self._path), isolation_level=None)
+        self._con.row_factory = sqlite3.Row
         if readonly:
             self._con.execute("PRAGMA query_only=ON")
         _pragmas(self._con)
