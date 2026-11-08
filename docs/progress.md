@@ -27,8 +27,21 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - python -m secretary --diagnose : DIAGNOSE OK
 - python -m secretary (offscreen) : main window opens, no crash
 
-## Test count (resolves 156 vs ~117)
-- python -m pytest --collect-only : 118 collected items; python -m pytest -q : 118 passed.
-- The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3: never claim without running). Actual verified count: 118. Gap is because 156 was reported without a pytest run, not because tests were deleted.
+## Current session (2026-11-08) — Phase 3 code-buildable work
+- src/secretary/tools/events.py (NEW): event_create (class B, own event — resolves when_text in code via resolve_when, persists start/end UTC + tz through events_repo, writes action_log) and event_list (class A — lists events in today/tomorrow/week window).
+- src/secretary/__main__.py: register events tools in registry + route event_create/event_list keywords.
+- tests/unit/tools/test_events.py (NEW): create persists, past-time raises PastTime, list returns created events (3 tests).
+- Verification: ruff ✓ | pytest 121 passed ✓ | lint-imports 7 kept/0 broken ✓. Committed as 3b6a7e6.
 
-## Next: Phase 3 (plan §21) — calendar/events repo + view; Google Calendar sync is HUMAN-GATED.
+## Phase 3 remaining (plan §21)
+- plan_day tool (code finds free slots; LLM phrases) — code-buildable, next.
+- conflict warnings on reminders/events — code-buildable.
+- Google Calendar read sync (windowed, sync tokens) — HUMAN-GATED (needs credentials.json / Google Cloud project).
+
+## Next: Phase 3.5 → 4 → 5 → 6 per plan §21 after Phase 3 code-buildable items.
+
+## Test count (resolves 156 vs ~117)
+- python -m pytest --collect-only : 121 collected items; python -m pytest -q : 121 passed.
+- The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3). Actual verified count: 121.
+
+## Next: Phase 3 (plan §21) — calendar/events repo + view already built; Google Calendar sync is HUMAN-GATED.
