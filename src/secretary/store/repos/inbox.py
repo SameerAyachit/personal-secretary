@@ -59,7 +59,7 @@ def update(
             params.append(v)
     if not sets:
         return False
-    cur = con.execute(f"UPDATE inbox SET {', '.join(sets)} WHERE id=?", params)
+    cur = con.execute(f"UPDATE inbox SET {', '.join(sets)} WHERE id=?", (*params, inbox_id))
     if cur.rowcount == 0:
         return False
     action_log(con, turn_id, "updated", "inbox", inbox_id, {"fields": list(fields)})

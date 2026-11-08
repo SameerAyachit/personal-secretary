@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme
-from secretary.ui.views import chat, settings, tasks, today
+from secretary.ui.views import chat, inbox, settings, tasks, today
 
 
 class MainWindow(QMainWindow):
@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
             "Chat": chat.ChatView(controller),
             "Tasks": tasks.TasksView(controller),
             "Calendar": QWidget(),
-            "Inbox": QWidget(),
+            "Inbox": inbox.InboxView(controller),
             "Approvals": QWidget(),
             "Settings": settings.SettingsView(),
         }

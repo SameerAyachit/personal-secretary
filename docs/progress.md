@@ -70,3 +70,7 @@ P2-01 DONE: src/secretary/scheduler/ticker.py (SchedulerThread with 30s tick on 
 
 Next: P2-02 inbox model/view with snooze/ack/done status transitions.
 
+P2-02 DONE: src/secretary/ui/views/inbox.py (Inbox view with per-item Ack/Snooze/Done buttons), controller gains list_inbox()/done_inbox(), store/inbox_repo.update fixed to bind the row id. Tests: tests/ui/test_inbox.py (refresh shows items, ack transitions away, done transitions away). ruff ✓, pytest ✓ (137 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-03 notifier layers: toast, popup card, tray badge; failure test (simulated notifier exception leaves inbox and popup).
+

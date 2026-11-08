@@ -53,6 +53,18 @@ class Controller(QObject):
         except Exception:
             return []
 
+    def list_inbox(self) -> list[dict]:
+        """Return unacknowledged inbox items (for the UI to display)."""
+        try:
+            return inbox_repo.list_unacknowledged(self.conn)
+        except Exception:
+            return []
+
+    def done_inbox(self, inbox_id: int) -> None:
+        inbox_repo.update(self.conn, inbox_id, status="done")
+        self.inbox_changed.emit()
+        self.turn_status.emit("Inbox item done.")
+
     # ---- Slots in -------------------------------------------------------
     @Slot(str, str)
     def create_task_manual(self, title: str, when_text: str = "") -> None:
