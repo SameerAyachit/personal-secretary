@@ -48,3 +48,7 @@ P1-06 DONE: src/secretary/tools/registry.py (SafetyClass A/B/C, ToolSpec, Regist
 
 Next: P1-07 agent loop with guards and normalize_response (plan §8.1).
 
+P1-07 DONE: src/secretary/agent/loop.py (run_turn with MAX_STEPS=5 guard, token budget via limiter, identical-call dedupe, cross-step loop detection, timeout), src/secretary/agent/normalize_response.py (Appendix C cases: JSON in content, fenced JSON, args-as-string, unknown tools dropped, duplicates deduped, trailing prose, empty content). Tests: tests/unit/agent/{test_loop,test_normalize_response} (12 tests). ruff ✓, pytest ✓ (118 tests total), lint-imports ✓ (7 kept, 0 broken).
+
+Next: P1-08 Controller facade + Chat and Tasks views with manual quick-add working without the LLM (pytest-qt).
+
