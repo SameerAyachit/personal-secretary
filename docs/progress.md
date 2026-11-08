@@ -44,3 +44,7 @@ P1-05 DONE: src/secretary/llm/limiter.py (token-bucket rpm+tpm, RequestTooLarge 
 
 Next: P1-06 tool registry, routing, safety classes, idempotency, undo (plan §8).
 
+P1-06 DONE: src/secretary/tools/registry.py (SafetyClass A/B/C, ToolSpec, Registry, LLM schemas with safety_class+group), src/secretary/tools/idempotency.py (sha256 idempotency key), src/secretary/agent/router.py (keyword selection, core group always available), src/secretary/tools/tasks.py (task_create Class B, task_list Class A with pydantic args), src/secretary/tools/email.py (email_send Class C → pending_actions waiting). Tests: tests/unit/tools/{test_registry,test_router,test_idempotency,test_tasks,test_email}. ruff ✓, pytest ✓ (106 tests total), lint-imports ✓ (7 kept, 0 broken).
+
+Next: P1-07 agent loop with guards and normalize_response (plan §8.1).
+
