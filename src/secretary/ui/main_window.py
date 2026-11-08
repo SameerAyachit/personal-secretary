@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme
-from secretary.ui.views import chat, inbox, settings, tasks, today
+from secretary.ui.views import approvals, chat, inbox, settings, tasks, today
 
 
 class MainWindow(QMainWindow):
@@ -51,12 +51,12 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
 
         self._views = {
-            "Today": today.TodayView(),
+            "Today": today.TodayView(controller),
             "Chat": chat.ChatView(controller),
             "Tasks": tasks.TasksView(controller),
             "Calendar": QWidget(),
             "Inbox": inbox.InboxView(controller),
-            "Approvals": QWidget(),
+            "Approvals": approvals.ApprovalsView(controller),
             "Settings": settings.SettingsView(),
         }
         for view in self._views.values():

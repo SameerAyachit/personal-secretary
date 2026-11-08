@@ -76,5 +76,9 @@ Next: P2-04 catch-up on start/wake (group missed reminders into one "While you w
 
 P2-04 DONE: src/secretary/scheduler/catchup.py (catch_up() groups missed reminders into one "While you were away" inbox entry; recurring reminders advanced to next future occurrence; those older than 24 h logged as missed and skipped; sweeper run). Tests: tests/scheduler/test_catchup.py (20 missed -> 1 entry, recurring advances, no-due case). ruff ✓, pytest ✓ (148 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
-Next: P2-05 Today view; approvals view shell; sweeper.
+P2-04 DONE: src/secretary/scheduler/catchup.py (catch_up() groups missed reminders into one "While you were away" inbox entry; recurring reminders advanced to next future occurrence; those older than 24 h logged as missed and skipped; sweeper run). Tests: tests/scheduler/test_catchup.py (20 missed -> 1 entry, recurring advances, no-due case). ruff ✓, pytest ✓ (148 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+P2-05 DONE: src/secretary/ui/views/today.py (Today view: unacknowledged reminders top with Snooze/Done, quick-add field, Plan my day, "While you were away" card), src/secretary/ui/views/approvals.py (Approvals view shell: waiting class-C actions with Approve/Reject), controller gains list_pending_actions(), sweeper runs each scheduler tick. Tests: tests/ui/test_inbox.py extended. ruff ✓, pytest ✓ (151 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-06 Quick-capture hotkey and tray menu.
 

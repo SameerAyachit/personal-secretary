@@ -8,6 +8,8 @@ Controller, which is allowed to import ``store`` per the layering contract.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from PySide6.QtCore import QObject, Signal, Slot
 
 from secretary.store.db import Connection
@@ -59,6 +61,15 @@ class Controller(QObject):
             return inbox_repo.list_unacknowledged(self.conn)
         except Exception:
             return []
+
+    def list_pending_actions(self) -> list[dict]:
+        """Return waiting class-C pending actions (for the Approvals view)."""
+        try:
+            now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return pa_repo.list_waiting(self.conn, now_iso=now_iso)
+        except Exception:
+            return []
+
 
     def done_inbox(self, inbox_id: int) -> None:
         inbox_repo.update(self.conn, inbox_id, status="done")
