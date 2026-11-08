@@ -74,3 +74,7 @@ P2-03 DONE: src/secretary/notify/notifier.py (toast via desktop-notifier best-ef
 
 Next: P2-04 catch-up on start/wake (group missed reminders into one "While you were away" inbox entry).
 
+P2-04 DONE: src/secretary/scheduler/catchup.py (catch_up() groups missed reminders into one "While you were away" inbox entry; recurring reminders advanced to next future occurrence; those older than 24 h logged as missed and skipped; sweeper run). Tests: tests/scheduler/test_catchup.py (20 missed -> 1 entry, recurring advances, no-due case). ruff ✓, pytest ✓ (148 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-05 Today view; approvals view shell; sweeper.
+
