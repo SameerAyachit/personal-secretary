@@ -88,16 +88,23 @@ class CircuitBreaker:
 
 
 class SearchCache:
-    """SQLite-backed cache keyed by a normalised query hash, TTL 24 h."""
+    """SQLite-backed cache keyed by a normalised query hash, TTL 24 h.
+
+    Uses :meth:`store.db.Connection.write` (BEGIN IMMEDIATE / COMMIT under the
+    writer lock) instead of bare ``COMMIT`` calls: the store connection runs
+    with ``isolation_level=None`` (autocommit), so there is never an active
+    transaction to commit unless one is explicitly begun (plan §5.4).
+    """
 
     def __init__(self, con) -> None:
         self._con = con
-        self._con.execute(
-            "CREATE TABLE IF NOT EXISTS search_cache ("
-            "query_hash TEXT PRIMARY KEY, query TEXT NOT NULL, "
-            "results_json TEXT NOT NULL, fetched_at TEXT NOT NULL)"
+        self._con.write(
+            lambda c: c.execute(
+                "CREATE TABLE IF NOT EXISTS search_cache ("
+                "query_hash TEXT PRIMARY KEY, query TEXT NOT NULL, "
+                "results_json TEXT NOT NULL, fetched_at TEXT NOT NULL)"
+            )
         )
-        self._con.execute("COMMIT")
 
     def _key(self, query: str) -> str:
         return hashlib.sha256(query.strip().lower().encode("utf-8")).hexdigest()
@@ -115,14 +122,15 @@ class SearchCache:
 
     def set(self, query: str, results: list[SearchResult]) -> None:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self._con.execute(
-            "INSERT INTO search_cache(query_hash, query, results_json, fetched_at) "
-            "VALUES(?,?,?,?) "
-            "ON CONFLICT(query_hash) DO UPDATE SET query=excluded.query, "
-            "results_json=excluded.results_json, fetched_at=excluded.fetched_at",
-            (self._key(query), query, json.dumps([r.to_dict() for r in results]), now),
+        self._con.write(
+            lambda c: c.execute(
+                "INSERT INTO search_cache(query_hash, query, results_json, fetched_at) "
+                "VALUES(?,?,?,?) "
+                "ON CONFLICT(query_hash) DO UPDATE SET query=excluded.query, "
+                "results_json=excluded.results_json, fetched_at=excluded.fetched_at",
+                (self._key(query), query, json.dumps([r.to_dict() for r in results]), now),
+            )
         )
-        self._con.execute("COMMIT")
 
 
 class SearchService:

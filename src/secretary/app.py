@@ -57,7 +57,9 @@ class App:
     """Holds the QApplication, the single-instance lock, and the worker thread."""
 
     def __init__(self, argv: list[str]) -> None:
-        self.app = QApplication(argv)
+        # Reuse an existing QApplication (tests may already have created one);
+        # a standalone ``python -m secretary`` run creates a fresh one.
+        self.app = QApplication.instance() or QApplication(argv)
         self.app.setQuitOnLastWindowClosed(False)
         self.app.setApplicationName("Secretary")
         self.app.setApplicationDisplayName("Secretary")
