@@ -8,10 +8,14 @@ Controller, which is allowed to import ``store`` per the layering contract.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from secretary.config import load_config, save_config
+from secretary.llm.probe import _probe_once
+from secretary.secrets import set_secret
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import pending_actions as pa_repo
@@ -69,6 +73,42 @@ class Controller(QObject):
             return pa_repo.list_waiting(self.conn, now_iso=now_iso)
         except Exception:
             return []
+
+    # ------------------------------------------------------------------ LLM provider
+
+    def set_llm_provider(
+        self, provider: str, key: str, base_url: str, model: str
+    ) -> None:
+        """Save an LLM API key to Credential Manager and persist provider config."""
+        set_secret("secretary", f"llm_api_key:{provider}", key)
+        cfg = load_config()
+        cfg.llm.active = provider
+        cfg.llm.providers[provider].base_url = base_url
+        cfg.llm.providers[provider].primary_model = model
+        cfg.llm.providers[provider].key_name = f"llm_api_key:{provider}"
+        save_config(cfg)
+
+    def test_llm_connection(self, base_url: str, api_key: str, model: str) -> dict:
+        """Send a tiny probe request and return the result dict."""
+        try:
+            result = asyncio.run(_probe_once(api_key, model))
+        except Exception as exc:
+            return {"error": str(exc)}
+        return result
+
+    def get_config(self) -> dict:
+        """Return current config values for the wizard to pre-fill."""
+        cfg = load_config()
+        return {
+            "timezone": cfg.app.timezone,
+            "start_minimized": cfg.app.start_minimized,
+        }
+
+    def save_general(self, timezone: str, start_minimized: bool) -> None:
+        cfg = load_config()
+        cfg.app.timezone = timezone
+        cfg.app.start_minimized = start_minimized
+        save_config(cfg)
 
 
     def done_inbox(self, inbox_id: int) -> None:

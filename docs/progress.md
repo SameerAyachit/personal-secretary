@@ -80,3 +80,7 @@ P2-06 DONE: src/secretary/hotkey.py (HotkeyFilter native event filter for WM_HOT
 
 Next: P2-07 First-run wizard with Test connection.
 
+P2-07 DONE: src/secretary/ui/views/onboarding.py (first-run wizard: provider/key, Test connection via controller, timezone/start_minimized), controller gains set_llm_provider/test_llm_connection/save_general/get_config (controller owns keyring/config/llm access; ui never touches store/llm directly). ruff ✓, pytest ✓ (156 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-08 Autostart toggle (Run key) and --minimized (installer.iss already wires Run key; Settings toggle in Phase 5). Then P2-09 Installer v0.1, manual test script, release v0.1.0.
+

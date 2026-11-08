@@ -219,9 +219,23 @@ def save_config(config: Config, path: Path | None = None) -> None:
     cfg_path = path or config_path()
     ensure_dirs()
     data = config.model_dump(mode="python")
-    try:
-        import tomli_w  # optional; only the wizard writes config  # noqa: PLC0415
-    except ImportError:
-        return
-    with cfg_path.open("wb") as fh:
-        tomli_w.dump(data, fh)
+    lines: list[str] = []
+    for section_name in (
+        "app", "llm", "tokens", "notifications", "pending_actions", "backup",
+        "search", "research", "google",
+    ):
+        section = getattr(data, section_name)
+        lines.append(f"[{section_name}]")
+        for key, value in section.items():
+            lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
+    with cfg_path.open("w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return f'"{value}"'
