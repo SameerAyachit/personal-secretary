@@ -38,5 +38,7 @@ P1-02 DONE: src/secretary/store/migrate.py (forward-only runner with schema_migr
 
 P1-03 DONE: src/secretary/timeparse/when.py (resolve_when with dateparser, DMY order, RELATIVE_BASE, AmbiguousTime/PastTime, whole-phrase synonyms tonight→20:00/EOD→20:00, half-hour→30 minutes), src/secretary/timeparse/format.py (format_when echo with weekday/date/time/zone). Tests: tests/unit/timeparse/test_when.py (14 tests) covering day-first, past-time, relative, synonyms, tz-aware output, unparseable. ruff ✓, pytest ✓ (40 tests total), lint-imports ✓.
 
-Next: P1-04 recurrence (grammar parser, next-occurrence via dateutil.rrule, property tests, 7 time-zone cases) per plan §9.3-9.4.
+P1-04 DONE: src/secretary/timeparse/recurrence.py (grammar parser parse_recurrence → RecurrenceRule; next_occurrence via dateutil.rrule/wall-clock + month-end clamp to last day of shorter months; UnparseableRecurrence). Tests: tests/unit/timeparse/test_recurrence.py (16 unit + hypothesis property tests: daily always-after, weekdays-is-weekday). ruff ✓, pytest ✓ (64 tests total), lint-imports ✓ (7 kept, 0 broken).
+
+Next: P1-05 LLM limiter + tokens (vendored cl100k_base encoding, TIKTOKEN_CACHE_DIR, RequestTooLarge, token-bucket reconcile). LLM client/FakeLLM/errors already built in P0-02.
 
