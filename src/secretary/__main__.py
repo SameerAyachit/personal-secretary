@@ -15,6 +15,7 @@ import keyring
 
 from secretary.agent.router import Router
 from secretary.app import create_app
+from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.tools import email as email_tools
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         migrate(conn._con, migrations_folder(), lambda: None)
         controller = Controller(conn)
 
-        # LLM provider, limiter, router, registry for the agent loop.
+        # Tool registry + router.
         registry = tools_registry.Registry()
         tasks_tools.register(registry)
         email_tools.register(registry)
@@ -72,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         router.route("email_send", ["send", "email"])
         router.route("web_search", ["search", "web"])
 
+        # LLM provider, limiter.
         llm = None
         limiter = None
         key = keyring.get_password("secretary", "llm_api_key:groq")
@@ -80,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
             limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
         controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
         window = MainWindow(controller)
+
+        # Search provider + cache + breaker.
+        provider = DDGSSearchProvider()
+        breaker = CircuitBreaker(failures=3, open_minutes=10)
+        search_service = SearchService(conn, provider, breaker)
+        conn.search_provider = search_service
 
         # Notifier + tray for reminders.
         notifier = Notifier(window.tray_icon())

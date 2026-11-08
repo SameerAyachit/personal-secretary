@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
@@ -53,8 +53,7 @@ class QuickCapture(QWidget):
         fg.moveCenter(geo.center())
         self.move(fg.topLeft())
 
-    @Slot
-    def _send(self) -> None:  # type: ignore[no-redef]
+    def _send(self) -> None:
         text = self._input.text().strip()
         if text:
             self._controller.send_message(text)
