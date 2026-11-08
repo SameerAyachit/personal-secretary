@@ -85,8 +85,12 @@ P2-07 DONE: src/secretary/ui/views/onboarding.py (first-run wizard: provider/key
 Next: P2-08 Autostart toggle (Run key) and --minimized (installer.iss already wires Run key; Settings toggle in Phase 5). Then P2-09 Installer v0.1, manual test script, release v0.1.0.
 
 P2-08 DONE: --minimized flag works (wired in __main__), Run-key autostart written by installer.iss (HKCU Run key). Settings toggle UI comes in Phase 5 Settings view.
-
 P2-09 DONE-HUMAN-GATED: packaging/secretary.spec + packaging/installer.iss exist; PyInstaller one-folder exe builds (verified in P0-05). Inno Setup (iscc) build + clean-profile install need a human on a clean profile.
 
-Next: Phase 3 (Calendar and planning: Google calendar read sync, events repo/view, plan_day).
+Next: Phase 3 (Calendar and planning: Google calendar read sync HUMAN-GATED, events repo/view built), Phase 4 (search provider + web_search tool built).
+
+P2-08 DONE: src/secretary/hotkey.py (HotkeyFilter native event filter for WM_HOTKEY), src/secretary/ui/quick_capture.py (centered quick-capture input, Enter sends, Esc closes), src/secretary/__main__.py (wires global hotkey Ctrl+Alt+Space + quick capture + scheduler + notifier + agent loop). ruff ✓, pytest ✓ (156 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Phase 3: events repo (store/events.py) + events view built; Google Calendar sync HUMAN-GATED (needs credentials). plan_day / event_create tools not yet built (code-buildable, deferred).
+Phase 4: search provider (ddgs + breaker + cache) + web_search tool built; research brief NOT built (code-buildable, deferred).
 
