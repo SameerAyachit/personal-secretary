@@ -11,14 +11,24 @@ from __future__ import annotations
 import argparse
 import sys
 
-from secretary.hotkey import GlobalHotkey, HotkeyFilter
+import keyring
+
+from secretary.agent.router import Router
+from secretary.app import create_app
+from secretary.llm.limiter import Limiter
+from secretary.llm.openai_compat import OpenAICompatClient
+from secretary.tools import email as email_tools
+from secretary.tools import registry as tools_registry
+from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
 
-from .app import create_app
 from .controller import Controller
 from .diagnose import run_diagnose
+from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
+from .notify.notifier import Notifier
 from .paths import db_path
+from .scheduler.ticker import SchedulerThread
 from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
 from .ui.main_window import MainWindow
@@ -50,13 +60,44 @@ def main(argv: list[str] | None = None) -> int:
         conn = Connection(db_path())
         migrate(conn._con, migrations_folder(), lambda: None)
         controller = Controller(conn)
+
+        # LLM provider, limiter, router, registry for the agent loop.
+        registry = tools_registry.Registry()
+        tasks_tools.register(registry)
+        email_tools.register(registry)
+        router = Router(registry)
+        router.route("tasks_add", ["task", "create", "add", "remind"])
+        router.route("tasks_list", ["task", "list", "show", "remind"])
+        router.route("reminders_add", ["remind", "reminder"])
+        router.route("email_send", ["send", "email"])
+        router.route("web_search", ["search", "web"])
+
+        llm = None
+        limiter = None
+        key = keyring.get_password("secretary", "llm_api_key:groq")
+        if key:
+            llm = OpenAICompatClient(base_url="https://api.groq.com/openai/v1", api_key=key, model="llama-3.1-8b-instant")
+            limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
+        controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
         window = MainWindow(controller)
+
+        # Notifier + tray for reminders.
+        notifier = Notifier(window.tray_icon())
 
         # Global hotkey for quick capture (Ctrl+Alt+Space).
         quick_capture = QuickCapture(controller)
         hotkey = GlobalHotkey(0x0003, 0x20, quick_capture.show_window)
         hotkey_filter = HotkeyFilter(hotkey, quick_capture.show_window)
         app.app.installNativeEventFilter(hotkey_filter)
+
+        # Scheduler thread fires reminders into the inbox.
+        def on_fired(entries):
+            for entry in entries:
+                notifier.notify(entry["title"], entry["body"], priority=True)
+            controller.inbox_changed.emit()
+
+        scheduler = SchedulerThread(conn, on_fired=on_fired)
+        scheduler.start()
 
         window.quick_capture = quick_capture
         if args.minimized:

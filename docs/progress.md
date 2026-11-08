@@ -84,3 +84,9 @@ P2-07 DONE: src/secretary/ui/views/onboarding.py (first-run wizard: provider/key
 
 Next: P2-08 Autostart toggle (Run key) and --minimized (installer.iss already wires Run key; Settings toggle in Phase 5). Then P2-09 Installer v0.1, manual test script, release v0.1.0.
 
+P2-08 DONE: --minimized flag works (wired in __main__), Run-key autostart written by installer.iss (HKCU Run key). Settings toggle UI comes in Phase 5 Settings view.
+
+P2-09 DONE-HUMAN-GATED: packaging/secretary.spec + packaging/installer.iss exist; PyInstaller one-folder exe builds (verified in P0-05). Inno Setup (iscc) build + clean-profile install need a human on a clean profile.
+
+Next: Phase 3 (Calendar and planning: Google calendar read sync, events repo/view, plan_day).
+

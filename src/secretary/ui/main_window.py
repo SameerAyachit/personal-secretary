@@ -9,12 +9,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QStackedWidget,
+    QSystemTrayIcon,
     QWidget,
 )
 
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme
-from secretary.ui.views import approvals, chat, inbox, settings, tasks, today
+from secretary.ui.views import approvals, chat, events, inbox, settings, tasks, today
 
 
 class MainWindow(QMainWindow):
@@ -50,11 +51,14 @@ class MainWindow(QMainWindow):
         # Content area.
         self._stack = QStackedWidget()
 
+        self._tray = QSystemTrayIcon(self)
+        self._tray.setToolTip("Secretary")
+
         self._views = {
             "Today": today.TodayView(controller),
             "Chat": chat.ChatView(controller),
             "Tasks": tasks.TasksView(controller),
-            "Calendar": QWidget(),
+            "Calendar": events.EventsView(controller),
             "Inbox": inbox.InboxView(controller),
             "Approvals": approvals.ApprovalsView(controller),
             "Settings": settings.SettingsView(),
@@ -65,6 +69,9 @@ class MainWindow(QMainWindow):
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
         self._controller.inbox_changed.connect(lambda: None)
+
+    def tray_icon(self):
+        return self._tray
 
     def _on_rail_changed(self, item: QListWidgetItem) -> None:
         if item is None:

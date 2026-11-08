@@ -13,10 +13,12 @@ from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from secretary.agent.loop import run_turn
 from secretary.config import load_config, save_config
 from secretary.llm.probe import _probe_once
-from secretary.secrets import set_secret
+from secretary.secrets import get_secret, set_secret
 from secretary.store.db import Connection
+from secretary.store.repos import events as events_repo
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
@@ -51,7 +53,6 @@ class Controller(QObject):
         self.llm = llm
         self.limiter = limiter
         self._turn_id = 0
-
     def list_tasks(self) -> list[dict]:
         """Return open tasks (for the UI to display)."""
         try:
@@ -110,6 +111,13 @@ class Controller(QObject):
         cfg.app.start_minimized = start_minimized
         save_config(cfg)
 
+    def list_events(self, start_iso: str | None = None, end_iso: str | None = None) -> list[dict]:
+        """Return calendar events in [start_iso, end_iso)."""
+        try:
+            return events_repo.list_window(self.conn, start_at=start_iso or "", end_at=end_iso or "")
+        except Exception:
+            return []
+
 
     def done_inbox(self, inbox_id: int) -> None:
         inbox_repo.update(self.conn, inbox_id, status="done")
@@ -139,15 +147,37 @@ class Controller(QObject):
 
     @Slot(str)
     def send_message(self, text: str) -> None:
-        """Handle a chat message. Without an LLM this echoes a placeholder."""
+        """Handle a chat message: run the agent loop when an LLM key is configured,
+        otherwise echo a placeholder."""
         self.turn_started.emit()
         if not text or not text.strip():
             self.turn_finished.emit("")
             return
-        self.turn_status.emit("Received.")
-        self.turn_finished.emit(
-            "I didn't catch an action there. Use the quick-add field to create a task or reminder."
-        )
+        key = get_secret("secretary", f"llm_api_key:{self.llm.active if self.llm else 'groq'}")
+        if not key:
+            self.turn_status.emit("No LLM key configured.")
+            self.turn_finished.emit(
+                "I don't have an LLM key configured yet. Set one in Settings to chat, "
+                "or use the quick-add field to create a task."
+            )
+            return
+        try:
+            result = asyncio.run(
+                run_turn(
+                    text,
+                    {"turn_id": f"turn-{self._turn_id}", "now": "", "tz": "Asia/Kolkata"},
+                    self._llm,
+                    self._limiter,
+                    self._router,
+                    self._registry,
+                    self.conn,
+                )
+            )
+        except Exception as exc:
+            self.turn_finished.emit(f"I hit an error: {exc}")
+            return
+        self.turn_finished.emit(result or "I'm not sure how to help with that.")
+
 
     @Slot(str)
     def undo(self, token: str) -> None:
