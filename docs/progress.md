@@ -68,9 +68,9 @@ Next: Phase 2 (reminders/inbox/native shell: P2-01 scheduler, P2-02 inbox model/
 
 P2-01 DONE: src/secretary/scheduler/ticker.py (SchedulerThread with 30s tick on its own QThread; atomic fire via claim status='firing', reminder_runs + inbox + next-occurrence advance; duplicate guard via UNIQUE(reminder_id, scheduled_for) + IntegrityError skip; repeat alerts, snooze expiry, sweeper all per-tick steps isolated so one failure never stops another). Tests: tests/scheduler/test_ticker.py (4 tests: fire creates inbox+marks done, duplicate prevented, recurring advances, tick runs). ruff ✓, pytest ✓ (134 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
-Next: P2-02 inbox model/view with snooze/ack/done status transitions.
-
 P2-02 DONE: src/secretary/ui/views/inbox.py (Inbox view with per-item Ack/Snooze/Done buttons), controller gains list_inbox()/done_inbox(), store/inbox_repo.update fixed to bind the row id. Tests: tests/ui/test_inbox.py (refresh shows items, ack transitions away, done transitions away). ruff ✓, pytest ✓ (137 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
 
-Next: P2-03 notifier layers: toast, popup card, tray badge; failure test (simulated notifier exception leaves inbox and popup).
+P2-03 DONE: src/secretary/notify/notifier.py (toast via desktop-notifier best-effort, QSystemTrayIcon.showMessage fallback, popup card, tray badge; all wrapped in try/except + logging so a notifier failure never crashes the app or loses the inbox row). Tests: tests/notifier/test_notifier.py (toast sent, desktop failure still shows popup, no desktop -> popup, tray badge). ruff ✓, pytest ✓ (145 tests total), lint-imports ✓ (7 kept, 0 broken), diagnose ✓.
+
+Next: P2-04 catch-up on start/wake (group missed reminders into one "While you were away" inbox entry).
 
