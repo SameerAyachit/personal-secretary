@@ -124,6 +124,10 @@ QLabel#Caption {{
 QLabel#Muted {{
     color: {p.text_muted};
 }}
+QLabel[newRecipient="true"] {{
+    font-weight: 600;
+    color: {p.warning};
+}}
 QToolTip {{
     background-color: {p.surface};
     border: 1px solid {p.border};

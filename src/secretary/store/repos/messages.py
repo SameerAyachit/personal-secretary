@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 
@@ -115,3 +116,20 @@ def list_triage_results(con: sqlite3.Connection, limit: int = 50) -> list[dict]:
         (limit,),
     )
     return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def list_known_addresses(con: sqlite3.Connection) -> list[str]:
+    """Addresses the user has already sent to or received from (message history)."""
+    cur = con.execute(
+        "SELECT from_addr, to_addrs FROM email_messages WHERE deleted_at IS NULL AND source <> 'draft'"
+    )
+    addresses: set[str] = set()
+    for from_addr, to_addrs in cur.fetchall():
+        addresses.add(from_addr)
+        try:
+            for addr in json.loads(to_addrs or "[]"):
+                if isinstance(addr, str) and addr:
+                    addresses.add(addr)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return sorted(addresses)

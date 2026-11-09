@@ -12,4 +12,7 @@ Order (what unblocks most first):
 
 Each item is HUMAN-GATED; the app must work without the LLM and without Google credentials.
 
-6. UI screenshots — eyeball docs/screenshots/settings_light_100.png and settings_dark_100.png against the secretary-ui-design checklist at 100% and 150% scaling (regenerate 150% with QT_SCALE_FACTOR=1.5).
+6. UI screenshots — eyeball docs/screenshots/settings_light_100.png, settings_dark_100.png,
+   approvals_empty_light_100.png, approvals_empty_dark_100.png, approvals_with_item_light_100.png,
+   approvals_with_item_dark_100.png against the secretary-ui-design checklist at 100% and
+   150% scaling (regenerate 150% with QT_SCALE_FACTOR=1.5).

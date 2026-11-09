@@ -72,12 +72,33 @@ class Controller(QObject):
             return []
 
     def list_pending_actions(self) -> list[dict]:
-        """Return waiting class-C pending actions (for the Approvals view)."""
+        """Return waiting class-C pending actions (for the Approvals view).
+
+        Email send actions are enriched with recipients/body and with the
+        recipients not seen in the user's message history, so the UI can
+        highlight them (plan §8.6).
+        """
         try:
             now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            return pa_repo.list_waiting(self.conn, now_iso=now_iso)
+            rows = pa_repo.list_waiting(self.conn, now_iso=now_iso)
         except Exception:
             return []
+        known = set(messages_repo.list_known_addresses(self.conn))
+        for row in rows:
+            if row["kind"] == "email.send":
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except json.JSONDecodeError:
+                    payload = {}
+                try:
+                    recipients = json.loads(payload.get("to") or "[]")
+                except json.JSONDecodeError:
+                    recipients = []
+                row["recipients"] = recipients
+                row["new_recipients"] = [r for r in recipients if r not in known]
+                row["subject"] = payload.get("subject", "")
+                row["body"] = payload.get("body", "")
+        return rows
 
     # ------------------------------------------------------------------ LLM provider
 

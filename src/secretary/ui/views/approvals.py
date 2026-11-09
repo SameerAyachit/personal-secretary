@@ -1,5 +1,6 @@
-"""Approvals view shell: waiting class-C actions with code-built summaries,
-Approve/Reject, expiry countdown (plan §12.2).
+"""Approvals view: waiting class-C actions with code-built summaries,
+Approve/Reject, expiry countdown, and recipient highlighting
+(plan §12.2, §8.6).
 """
 
 from __future__ import annotations
@@ -27,8 +28,17 @@ class ApprovalsView(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        layout.addWidget(QLabel("Approvals awaiting your decision"))
+        self._title = QLabel("Approvals awaiting your decision")
+        self._title.setObjectName("Section")
+        layout.addWidget(self._title)
+
+        self._empty = QLabel("No approvals awaiting your decision.")
+        self._empty.setObjectName("Caption")
+        self._empty.hide()
+        layout.addWidget(self._empty)
+
         self._list = QListWidget()
+        self._list.setFrameStyle(0)  # no frame
         layout.addWidget(self._list)
 
         self._controller.approvals_changed.connect(self.refresh)
@@ -40,23 +50,65 @@ class ApprovalsView(QWidget):
             rows = self._controller.list_pending_actions()
         except Exception:
             rows = []
+        has_rows = bool(rows)
+        self._title.setVisible(has_rows)
+        self._empty.setVisible(not has_rows)
         for row in rows:
-            item = QListWidgetItem(f"{row['summary']}\n{row['payload_json']}")
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, row["id"])
             self._list.addItem(item)
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(4, 2, 4, 2)
-            row_layout.addWidget(QLabel(row["status"]))
-            approve = QPushButton("Approve")
-            approve.clicked.connect(
-                lambda checked, iid=row["id"]: self._controller.approve_action(iid)
-            )
-            reject = QPushButton("Reject")
-            reject.clicked.connect(
-                lambda checked, iid=row["id"]: self._controller.reject_action(iid)
-            )
-            row_layout.addStretch()
-            row_layout.addWidget(approve)
-            row_layout.addWidget(reject)
-            self._list.setItemWidget(item, row_widget)
+            self._list.setItemWidget(item, self._row_widget(row))
+
+    def _row_widget(self, row: dict) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        summary = QLabel(row["summary"])
+        summary.setObjectName("Body")
+        layout.addWidget(summary)
+
+        recipients = row.get("recipients") or []
+        if recipients:
+            rec_box = QHBoxLayout()
+            rec_box.addWidget(QLabel("To:"))
+            new_recipients = set(row.get("new_recipients") or [])
+            for recipient in recipients:
+                rec_label = QLabel(recipient + (" (new)" if recipient in new_recipients else ""))
+                rec_label.setObjectName("Caption")
+                if recipient in new_recipients:
+                    rec_label.setProperty("newRecipient", True)
+                    rec_label.style().unpolish(rec_label)
+                    rec_label.style().polish(rec_label)
+                rec_box.addWidget(rec_label)
+            rec_box.addStretch()
+            layout.addLayout(rec_box)
+
+        body = row.get("body") or ""
+        if body:
+            body_label = QLabel(body)
+            body_label.setObjectName("Caption")
+            body_label.setWordWrap(True)
+            layout.addWidget(body_label)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        status = QLabel(row["status"])
+        status.setObjectName("Caption")
+        button_layout.addWidget(status)
+        approve = QPushButton("Approve")
+        approve.setAccessibleName(f"Approve {row['summary']}")
+        approve.clicked.connect(
+            lambda checked, iid=row["id"]: self._controller.approve_action(iid)
+        )
+        reject = QPushButton("Reject")
+        reject.setAccessibleName(f"Reject {row['summary']}")
+        reject.clicked.connect(
+            lambda checked, iid=row["id"]: self._controller.reject_action(iid)
+        )
+        button_layout.addWidget(approve)
+        button_layout.addWidget(reject)
+        layout.addLayout(button_layout)
+
+        return widget

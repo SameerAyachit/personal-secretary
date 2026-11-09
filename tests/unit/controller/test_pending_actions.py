@@ -82,6 +82,28 @@ def test_approve_expired_action_refused():
         conn.close()
 
 
+def test_pending_actions_highlights_new_recipients():
+    conn = _conn()
+    try:
+        controller = Controller(conn)
+        messages_repo.create(
+            conn, from_addr="boss@example.com", to_addrs='["me@example.com"]',
+            subject="Old", body="Old mail", received_at="2026-11-09T08:00:00+00:00", turn_id="s")
+        draft_id = messages_repo.create(
+            conn, from_addr="me@example.com", to_addrs='["ravi@example.com", "boss@example.com"]',
+            subject="Draft", body="Body", received_at="2026-11-09T09:00:00+00:00", source="draft", turn_id="s")
+        email_send_prepare(conn, "t-1", {"draft_ref": str(draft_id)})
+        rows = controller.list_pending_actions()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["recipients"] == ["ravi@example.com", "boss@example.com"]
+        assert row["new_recipients"] == ["ravi@example.com"]
+        assert row["body"] == "Body"
+        assert row["subject"] == "Draft"
+    finally:
+        conn.close()
+
+
 def test_reject_action():
     conn = _conn()
     try:
