@@ -9,6 +9,7 @@ tests, per EXECUTION_PROTOCOL §0).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -29,9 +30,38 @@ def config_path() -> Path:
     return data_root() / "config.toml"
 
 
+def credential_candidates() -> list[Path]:
+    """Candidate credentials.json locations in priority order.
+
+    1. ``SECRETARY_CREDENTIALS`` env var if set.
+    2. ``%LOCALAPPDATA%\\Secretary\\credentials.json`` (installed app default).
+    3. Project root ``credentials.json`` when running from source (not frozen).
+    """
+    env = os.environ.get("SECRETARY_CREDENTIALS")
+    if env:
+        return [Path(env)]
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        installed = Path(local) / "Secretary" / "credentials.json"
+        if not getattr(sys, "frozen", False):
+            return [installed, Path(__file__).resolve().parents[2] / "credentials.json"]
+        return [installed]
+    if not getattr(sys, "frozen", False):
+        return [Path(__file__).resolve().parents[2] / "credentials.json"]
+    return [Path.home() / ".secretary" / "credentials.json"]
+
+
 def credentials_path() -> Path:
-    """Google OAuth client secret (BYO), lives next to config.toml (plan §6.1)."""
-    return data_root() / "credentials.json"
+    """Google OAuth client secret (BYO).
+
+    Returns the first existing candidate in priority order, or the
+    highest-priority default if none exists (so callers can display it).
+    Never reads or logs the file contents.
+    """
+    for candidate in credential_candidates():
+        if candidate.exists():
+            return candidate
+    return credential_candidates()[0]
 
 
 def db_path() -> Path:

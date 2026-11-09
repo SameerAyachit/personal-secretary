@@ -36,13 +36,18 @@ needed to develop or run the test suite.
 
 ## 4. Install credentials.json
 
-Place `credentials.json` next to `config.toml` in the Secretary data root:
+`credentials.json` is looked up in this order:
 
-- Default data root: `%LOCALAPPDATA%\Secretary\credentials.json`
-- Override: set `SECRETARY_DATA_ROOT` and place it there.
+1. `SECRETARY_CREDENTIALS` environment variable, if set (points to any path).
+2. `%LOCALAPPDATA%\Secretary\credentials.json` (installed-app default).
+3. The project root `credentials.json`, only when running from source (not PyInstaller-frozen).
+
+The first existing file wins. During source development you may place
+`credentials.json` at the project root (next to this repo); the installed app
+uses the `%LOCALAPPDATA%\Secretary\` location.
 
 The file is git-ignored and never committed. It contains your client secret — treat
-it like a password.
+it like a password. Never print or log its contents.
 
 ## 5. Configure keys (optional but recommended)
 

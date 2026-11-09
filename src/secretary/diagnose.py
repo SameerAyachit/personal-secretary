@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from .paths import credentials_path
+from .paths import credential_candidates
 from .secrets import get_secret
 
 
@@ -62,11 +62,16 @@ def run_diagnose() -> int:
         problems.append(f"tzdata missing: {exc}")
 
     # Google OAuth credentials file (never print its contents)
-    creds_path = credentials_path()
-    if creds_path.exists():
-        ok.append(f"Google credentials present: {creds_path}")
+    found = None
+    for candidate in credential_candidates():
+        if candidate.exists():
+            found = candidate
+            break
+    if found:
+        ok.append(f"Google credentials present: {found}")
     else:
-        problems.append(f"Google credentials missing: {creds_path}")
+        checked = ", ".join(str(c) for c in credential_candidates())
+        problems.append(f"Google credentials missing (checked: {checked})")
 
     # LLM / Google API keys stored in Credential Manager (never print values)
     for label, key_name in (

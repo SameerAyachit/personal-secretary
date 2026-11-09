@@ -32,12 +32,44 @@ def test_ensure_dirs_creates_subdirs(monkeypatch, tmp_path):
     assert tmp_path.is_dir()
 
 
-def test_credentials_path_under_data_root(monkeypatch, tmp_path):
-    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
-    assert p.credentials_path() == tmp_path / "credentials.json"
-
-
-def test_credentials_path_defaults_to_localappdata(monkeypatch):
-    monkeypatch.delenv("SECRETARY_DATA_ROOT", raising=False)
+def test_credentials_path_env_var_wins(monkeypatch, tmp_path):
+    monkeypatch.delenv("SECRETARY_CREDENTIALS", raising=False)
+    monkeypatch.setenv("SECRETARY_CREDENTIALS", str(tmp_path / "creds.json"))
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\tester\AppData\Local")
-    assert p.credentials_path() == Path(r"C:\Users\tester\AppData\Local\Secretary\credentials.json")
+    monkeypatch.setattr(p.sys, "frozen", False, raising=False)
+    assert p.credentials_path() == tmp_path / "creds.json"
+
+
+def test_credentials_path_localappdata_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("SECRETARY_CREDENTIALS", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    (tmp_path / "Secretary").mkdir()
+    (tmp_path / "Secretary" / "credentials.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(p.sys, "frozen", False, raising=False)
+    assert p.credentials_path() == tmp_path / "Secretary" / "credentials.json"
+
+
+def test_credentials_path_falls_back_to_project_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("SECRETARY_CREDENTIALS", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(p.sys, "frozen", False, raising=False)
+    assert p.credentials_path() == Path(__file__).resolve().parents[3] / "credentials.json"
+
+
+def test_credentials_path_frozen_no_project_root_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("SECRETARY_CREDENTIALS", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    (tmp_path / "Secretary").mkdir()
+    (tmp_path / "Secretary" / "credentials.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(p.sys, "frozen", True, raising=False)
+    assert p.credentials_path() == tmp_path / "Secretary" / "credentials.json"
+
+
+def test_credentials_path_returns_existing_first(monkeypatch, tmp_path):
+    monkeypatch.delenv("SECRETARY_CREDENTIALS", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    (tmp_path / "Secretary").mkdir()
+    (tmp_path / "Secretary" / "credentials.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(p.sys, "frozen", False, raising=False)
+    # Both exist; LOCALAPPDATA (higher priority) wins.
+    assert p.credentials_path() == tmp_path / "Secretary" / "credentials.json"
