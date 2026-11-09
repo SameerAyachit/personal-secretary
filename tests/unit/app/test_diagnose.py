@@ -1,10 +1,17 @@
-"""Tests for diagnose.py — reports key/credential presence (never values)."""
+"""Tests for diagnose.py — reports key/credential presence (never values).
+
+Exit code semantics:
+- FAIL (exit 1): Python version, config load, keyring importable,
+  store connects, tzdata.
+- WARN (exit 0 unless a FAIL is present): missing Groq/Gemini keys,
+  missing Google refresh token, missing credentials.json.
+"""
 from __future__ import annotations
 
 import secretary.diagnose as d
 
 
-def test_diagnose_all_present_ok(monkeypatch, tmp_path, capsys):
+def test_diagnose_all_ok_exit_zero(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
     creds = tmp_path / "credentials.json"
     creds.write_text("{}", encoding="utf-8")
@@ -13,24 +20,27 @@ def test_diagnose_all_present_ok(monkeypatch, tmp_path, capsys):
     code = d.run_diagnose()
     out = capsys.readouterr().out
     assert code == 0
-    assert "Google credentials present" in out
+    assert out.startswith("DIAGNOSE OK")
+    assert "Google credentials present:" in out
     assert str(creds) in out
-    assert "Groq API key present" in out
-    assert "Gemini API key present" in out
-    assert "Google refresh token present" in out
+    assert "Groq API key [OK]" in out
+    assert "Gemini API key [OK]" in out
+    assert "Google refresh token [OK]" in out
 
 
-def test_diagnose_missing_credentials_json(monkeypatch, tmp_path, capsys):
+def test_diagnose_missing_optional_is_warn_exit_zero(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
     creds = tmp_path / "credentials.json"
     monkeypatch.setattr(d, "credential_candidates", lambda: [creds])
     monkeypatch.setattr(d, "get_secret", lambda name: None)
     code = d.run_diagnose()
     out = capsys.readouterr().out
-    assert code == 1
-    assert "Google credentials missing" in out
+    assert code == 0
+    assert out.startswith("DIAGNOSE OK")
+    assert "Google credentials [WARN] missing" in out
     assert str(creds) in out
-    assert "Google refresh token missing" in out
+    assert "Groq API key [WARN] missing" in out
+    assert "Google refresh token [WARN] missing" in out
 
 
 def test_diagnose_prints_all_paths_checked_when_missing(monkeypatch, tmp_path, capsys):
@@ -41,9 +51,46 @@ def test_diagnose_prints_all_paths_checked_when_missing(monkeypatch, tmp_path, c
     monkeypatch.setattr(d, "get_secret", lambda name: None)
     d.run_diagnose()
     out = capsys.readouterr().out
-    assert "Google credentials missing" in out
+    assert "Google credentials [WARN] missing" in out
+    assert "checked:" in out
     assert str(p1) in out
     assert str(p2) in out
+
+
+def test_diagnose_missing_critical_is_fail_exit_one(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    creds = tmp_path / "credentials.json"
+    creds.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(d, "credential_candidates", lambda: [creds])
+    monkeypatch.setattr(d, "get_secret", lambda name: None)
+    # tzdata missing -> critical FAIL (exit 1 even though optional items are present)
+    def boom(name):
+        raise KeyError(name)
+
+    monkeypatch.setattr(d, "ZoneInfo", boom)
+    code = d.run_diagnose()
+    out = capsys.readouterr().out
+    assert code == 1
+    assert out.startswith("DIAGNOSE FAILED")
+    assert "tzdata [FAIL]" in out
+    # optional items carry [WARN] even though exit is 1
+    assert "Google refresh token [WARN] missing" in out
+    assert str(creds) in out
+
+
+def test_diagnose_markers_used(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    creds = tmp_path / "credentials.json"
+    creds.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(d, "credential_candidates", lambda: [creds])
+    monkeypatch.setattr(d, "get_secret", lambda name: "present")
+    d.run_diagnose()
+    out = capsys.readouterr().out
+    assert "on win32 [OK]" in out
+    assert "config load [OK]" in out
+    assert "keyring importable [OK]" in out
+    assert "store connects (WAL + foreign_keys) [OK]" in out
+    assert "tzdata [OK]" in out
 
 
 def test_diagnose_reports_each_key_individually(monkeypatch, tmp_path, capsys):
@@ -51,11 +98,14 @@ def test_diagnose_reports_each_key_individually(monkeypatch, tmp_path, capsys):
     creds = tmp_path / "credentials.json"
     creds.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(d, "credential_candidates", lambda: [creds])
-    monkeypatch.setattr(d, "get_secret", lambda name: "present" if name == "llm_api_key:groq" else None)
+    monkeypatch.setattr(
+        d,
+        "get_secret",
+        lambda name: "present" if name == "llm_api_key:groq" else None,
+    )
     code = d.run_diagnose()
     out = capsys.readouterr().out
-    # code == 1 because gemini + google_token are missing
-    assert code == 1
-    assert "Groq API key present" in out
-    assert "Gemini API key missing" in out
-    assert "Google refresh token missing" in out
+    assert code == 0
+    assert "Groq API key [OK]" in out
+    assert "Gemini API key [WARN] missing" in out
+    assert "Google refresh token [WARN] missing" in out

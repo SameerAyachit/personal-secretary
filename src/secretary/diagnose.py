@@ -2,11 +2,21 @@
 
 ``run_diagnose()`` checks configuration, secret storage, store connectivity,
 and provider reachability without performing any writes. Returns an exit code.
+
+Exit code semantics:
+- FAIL (exit 1): Python version, config load, keyring importable,
+  store connects, tzdata.
+- WARN (exit 0 unless a FAIL is present): missing Groq/Gemini keys,
+  missing Google refresh token, missing credentials.json.
+
+Every check line carries a marker: [OK], [WARN] or [FAIL].
+Secret values are never printed.
 """
 
 from __future__ import annotations
 
 import sys
+from zoneinfo import ZoneInfo
 
 from .paths import credential_candidates
 from .secrets import get_secret
@@ -20,46 +30,62 @@ def _secret_present(key_name: str) -> bool:
 
 
 def run_diagnose() -> int:
-    problems: list[str] = []
-    ok: list[str] = []
+    oks: list[str] = []
+    warns: list[str] = []
+    fails: list[str] = []
 
-    # Python / platform
-    ok.append(f"Python {sys.version.split()[0]} on {sys.platform}")
+    # ---- Critical checks (FAIL -> exit code 1) ---------------------------
+
+    # Python version (plan requires >= 3.12).
+    py_ok = sys.version_info >= (3, 12)
+    if py_ok:
+        oks.append(f"Python {sys.version.split()[0]} on {sys.platform} [OK]")
+    else:
+        fails.append(
+            f"Python {sys.version.split()[0]} on {sys.platform} [FAIL] "
+            f"(requires >= 3.12)"
+        )
 
     # Config
     try:
-        from .config import load_config  # noqa: PLC0415  (optional module, loaded lazily)
+        from .config import load_config  # noqa: PLC0415  (optional module)
+
         cfg = load_config()
-        ok.append("config loaded")
         if not cfg:
-            problems.append("config is empty")
+            fails.append("config is empty [FAIL]")
+        else:
+            oks.append("config load [OK]")
     except Exception as exc:
-        problems.append(f"config load failed: {exc}")
+        fails.append(f"config load [FAIL]: {exc}")
 
     # Secrets / keyring
     try:
-        ok.append("keyring importable")
+        keyring_mod = __import__("keyring")
+        keyring_mod.get_password  # ensure attribute exists
+        oks.append("keyring importable [OK]")
     except Exception as exc:
-        problems.append(f"keyring unavailable: {exc}")
+        fails.append(f"keyring importable [FAIL]: {exc}")
 
     # Store (SQLite WAL)
     try:
-        from .store.db import Connection  # noqa: PLC0415  (optional module, loaded lazily)
+        from .store.db import Connection  # noqa: PLC0415  (optional module)
+
         conn = Connection(":memory:")
         conn.execute("PRAGMA journal_mode=wal")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.close()
-        ok.append("store connects (WAL + foreign_keys)")
+        oks.append("store connects (WAL + foreign_keys) [OK]")
     except Exception as exc:
-        problems.append(f"store connect failed: {exc}")
+        fails.append(f"store connects [FAIL]: {exc}")
 
-    # timezone data
+    # Timezone data
     try:
-        from zoneinfo import ZoneInfo  # noqa: PLC0415  (optional import, loaded lazily)
         ZoneInfo("Asia/Kolkata")
-        ok.append("tzdata present")
+        oks.append("tzdata [OK]")
     except Exception as exc:
-        problems.append(f"tzdata missing: {exc}")
+        fails.append(f"tzdata [FAIL]: {exc}")
+
+    # ---- Optional checks (WARN -> exit code 0 unless a FAIL is present) --
 
     # Google OAuth credentials file (never print its contents)
     found = None
@@ -68,10 +94,10 @@ def run_diagnose() -> int:
             found = candidate
             break
     if found:
-        ok.append(f"Google credentials present: {found}")
+        oks.append(f"Google credentials present: {found} [OK]")
     else:
         checked = ", ".join(str(c) for c in credential_candidates())
-        problems.append(f"Google credentials missing (checked: {checked})")
+        warns.append(f"Google credentials [WARN] missing (checked: {checked})")
 
     # LLM / Google API keys stored in Credential Manager (never print values)
     for label, key_name in (
@@ -80,18 +106,22 @@ def run_diagnose() -> int:
         ("Google refresh token", "google_token"),
     ):
         if _secret_present(key_name):
-            ok.append(f"{label} present in Credential Manager")
+            oks.append(f"{label} [OK]")
         else:
-            problems.append(f"{label} missing in Credential Manager ({key_name})")
+            warns.append(f"{label} [WARN] missing")
 
-    if problems:
+    if fails:
         print("DIAGNOSE FAILED")
-        for p in problems:
+        for p in fails:
             print(f"  [X] {p}")
-        for o in ok:
+        for w in warns:
+            print(f"  [!] {w}")
+        for o in oks:
             print(f"  [ ] {o}")
         return 1
     print("DIAGNOSE OK")
-    for o in ok:
+    for o in oks:
         print(f"  [x] {o}")
+    for w in warns:
+        print(f"  [!] {w}")
     return 0
