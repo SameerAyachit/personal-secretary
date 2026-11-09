@@ -36,7 +36,11 @@ class Connection:
 
     def __init__(self, path: Path, readonly: bool = False):
         self._path = path
-        self._con = sqlite3.connect(str(self._path), isolation_level=None)
+        # check_same_thread=False: one connection shared across the main/UI
+        # thread and background worker/scheduler threads; all access is
+        # serialized by _WRITER_LOCK in write/read/execute (plan §5.4).
+        self._con = sqlite3.connect(str(self._path), isolation_level=None,
+                                    check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         if readonly:
             self._con.execute("PRAGMA query_only=ON")
@@ -56,11 +60,14 @@ class Connection:
                 raise
 
     def read(self, fn):
-        """Run ``fn`` with read access to the connection."""
-        return fn(self._con)
+        """Run ``fn`` with read access to the connection (serialized)."""
+        with _WRITER_LOCK:
+            return fn(self._con)
 
     def execute(self, sql, parameters=()):
-        return self._con.execute(sql, parameters)
+        """Execute ``sql`` (serialized)."""
+        with _WRITER_LOCK:
+            return self._con.execute(sql, parameters)
 
     def close(self) -> None:
         self._con.close()
