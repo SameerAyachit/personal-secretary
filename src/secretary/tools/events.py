@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
-from secretary.timeparse.when import resolve_when
+from secretary.timeparse.when import resolve_date, resolve_when
 from secretary.tools.registry import SafetyClass, ToolSpec
 
 _DEFAULT_TZ = "Asia/Kolkata"
@@ -37,19 +38,33 @@ def _duration_minutes(duration_text: str) -> int:
 
 class EventCreateArgs(BaseModel):
     title: str = Field(..., description="Event title in the user's words")
-    when_text: str = Field(..., description="Start time in the user's words")
+    when_text: str = Field(..., description="Start time (or date for all-day events) in the user's words")
     duration_text: str = Field("1 hour", description="Duration, e.g. '30 minutes' or '1 hour'")
     location: str | None = Field(None, description="Optional location")
     tz: str = Field(_DEFAULT_TZ, description="Time zone for the event")
+    all_day: bool = Field(False, description="All-day event: when_text is a date and the event occupies the whole day")
+
+
+def _day_bounds(day_text: str, now: datetime, tz: str) -> tuple[datetime, datetime]:
+    """Resolve an all-day date to [local midnight, next local midnight)."""
+    zone = ZoneInfo(tz)
+    day = resolve_date(day_text, now, tz)
+    start_local = datetime(day.year, day.month, day.day, tzinfo=zone)
+    return start_local, start_local + timedelta(days=1)
 
 
 def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
     parsed = EventCreateArgs(**args)
     now = datetime.now(UTC)
-    start = resolve_when(parsed.when_text, now, parsed.tz)
-    end = start + timedelta(minutes=_duration_minutes(parsed.duration_text))
-    start_utc = start.astimezone(UTC)
-    end_utc = end.astimezone(UTC)
+    if parsed.all_day:
+        start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
+        all_day = 1
+    else:
+        start_local = resolve_when(parsed.when_text, now, parsed.tz)
+        end_local = start_local + timedelta(minutes=_duration_minutes(parsed.duration_text))
+        all_day = 0
+    start_utc = start_local.astimezone(UTC)
+    end_utc = end_local.astimezone(UTC)
     # Class B conflict warning: warn about overlapping EXISTING events before
     # inserting (so the new event is not flagged against itself).
     conflicts = _overlapping_events(conn, start_utc, end_utc)
@@ -59,11 +74,11 @@ def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
         start_at=start_utc.isoformat(),
         end_at=end_utc.isoformat(),
         tz=parsed.tz,
-        all_day=0,
+        all_day=all_day,
         location=parsed.location,
         turn_id=turn_id,
     )
-    result = {"event_id": event_id, "title": parsed.title, "start_at": start.isoformat()}
+    result = {"event_id": event_id, "title": parsed.title, "start_at": start_local.isoformat(), "all_day": bool(all_day)}
     if conflicts:
         result["conflicts"] = conflicts
     return result
@@ -112,7 +127,7 @@ def event_list(conn: Connection, turn_id: str, args: dict) -> dict:
     start, end = _window_for(parsed.filter, now)
     rows = events_repo.list_window(conn, start_at=start, end_at=end)
     events = [
-        {"id": r["id"], "title": r["title"], "start_at": r["start_at"]} for r in rows
+        {"id": r["id"], "title": r["title"], "start_at": r["start_at"], "all_day": bool(r["all_day"])} for r in rows
     ]
     if parsed.query:
         q = parsed.query.lower()

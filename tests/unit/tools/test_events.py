@@ -104,3 +104,45 @@ def test_event_create_warns_on_overlapping_event():
             assert any(c["title"] == "first event" for c in result["conflicts"])
         finally:
             conn.close()
+
+
+def test_event_create_all_day_stores_day_bounds():
+    # Kolkata 2026-11-09 all day -> stored as [2026-11-08 18:30Z, 2026-11-09 18:30Z).
+    frozen = datetime(2026, 11, 9, 4, 0, 0, tzinfo=UTC)
+    with time_machine.travel(frozen):
+        conn = _conn()
+        try:
+            result = event_create(
+                conn,
+                "turn-1",
+                {"title": "holiday", "when_text": "2026-11-09", "tz": "Asia/Kolkata", "all_day": True},
+            )
+            assert result["event_id"]
+            assert result["all_day"] is True
+            assert result["start_at"] == "2026-11-09T00:00:00+05:30"
+            row = events_repo.list_window(
+                conn, start_at="2026-11-08T18:30:00+00:00", end_at="2026-11-09T18:30:00+00:00"
+            )[0]
+            assert row["all_day"] == 1
+            assert row["start_at"] == "2026-11-08T18:30:00+00:00"
+            assert row["end_at"] == "2026-11-09T18:30:00+00:00"
+        finally:
+            conn.close()
+
+
+def test_event_create_all_day_conflicts_with_timed_event():
+    frozen = datetime(2026, 11, 9, 4, 0, 0, tzinfo=UTC)
+    with time_machine.travel(frozen):
+        conn = _conn()
+        try:
+            event_create(
+                conn,
+                "turn-1",
+                {"title": "holiday", "when_text": "2026-11-09", "tz": "Asia/Kolkata", "all_day": True},
+            )
+            result = event_create(
+                conn, "turn-2", {"title": "meeting", "when_text": "today 10:00", "tz": "Asia/Kolkata"}
+            )
+            assert any(c["title"] == "holiday" for c in result["conflicts"])
+        finally:
+            conn.close()

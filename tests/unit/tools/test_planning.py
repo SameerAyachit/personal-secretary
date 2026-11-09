@@ -67,6 +67,24 @@ def test_plan_day_no_events_returns_full_working_day():
         conn.close()
 
 
+def test_plan_day_all_day_event_blocks_whole_day():
+    conn = _conn()
+    try:
+        events_repo.create(
+            conn,
+            title="holiday",
+            start_at="2026-11-08T18:30:00+00:00",
+            end_at="2026-11-09T18:30:00+00:00",
+            tz="Asia/Kolkata",
+            all_day=1,
+            turn_id="turn-test",
+        )
+        result = plan_day(conn, "turn-1", {"date_text": "2026-11-09", "tz": "Asia/Kolkata"})
+        assert result["free_slots"] == []
+    finally:
+        conn.close()
+
+
 def test_plan_day_defaults_to_today():
     conn = _conn()
     try:
