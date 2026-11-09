@@ -1,0 +1,167 @@
+"""Google Calendar read sync with nextSyncToken (plan §10.6, §14).
+
+Windowed sync of ``events.list`` into the local events repo. All HTTP goes
+through ``GoogleAuth`` (refresh handled there); tests mock httpx with respx, so
+no real Google credentials are needed. The OAuth consent flow itself remains
+human-gated.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import httpx
+
+from secretary.integrations.google.auth import GoogleAuth
+from secretary.store.db import Connection
+from secretary.store.repos import events as events_repo
+from secretary.store.repos import settings as settings_repo
+
+CALENDAR_API = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+SYNC_TOKEN_KEY = "google_sync_token"
+_DEFAULT_TZ = "Asia/Kolkata"
+
+
+class GoogleCalendarError(Exception):
+    """Raised when a Calendar API call fails."""
+
+
+class CalendarClient:
+    """Thin client over Google Calendar v3 ``events.list``."""
+
+    def __init__(self, auth: GoogleAuth, client: httpx.Client | None = None) -> None:
+        self._auth = auth
+        self._client = client or httpx.Client()
+
+    def list_events(
+        self,
+        calendar_id: str,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        page_token: str | None = None,
+        sync_token: str | None = None,
+    ) -> dict:
+        params: dict[str, str] = {"maxResults": "2500"}
+        if sync_token:
+            params["syncToken"] = sync_token
+        else:
+            if time_min is None or time_max is None:
+                raise ValueError("time_min and time_max are required without sync_token")
+            params["timeMin"] = time_min
+            params["timeMax"] = time_max
+            params["singleEvents"] = "true"
+        if page_token:
+            params["pageToken"] = page_token
+        url = CALENDAR_API.format(calendar_id=calendar_id)
+        try:
+            response = self._client.get(
+                url, params=params, headers=self._auth.auth_header(), timeout=30.0
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
+        return response.json()
+
+
+def _parse_times(item: dict) -> tuple[str, str, int]:
+    """Return (start_at_iso, end_at_iso, all_day) for a Calendar API event."""
+    start = item.get("start", {}) or {}
+    end = item.get("end", {}) or {}
+    if "date" in start:  # all-day event
+        day = datetime.fromisoformat(start["date"]).date()
+        zone = ZoneInfo(start.get("timeZone", _DEFAULT_TZ))
+        start_local = datetime(day.year, day.month, day.day, tzinfo=zone)
+        end_local = start_local + timedelta(days=1)
+        return start_local.astimezone(UTC).isoformat(), end_local.astimezone(UTC).isoformat(), 1
+    start_raw = start.get("dateTime", "")
+    end_raw = end.get("dateTime", "")
+    start_at = _to_utc(start_raw)
+    end_at = _to_utc(end_raw) if end_raw else start_at
+    return start_at, end_at, 0
+
+
+def _to_utc(value: str) -> str:
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat()
+
+
+def _upsert_event(conn: Connection, item: dict, turn_id: str) -> str:
+    """Insert or update one event by google_event_id; return the event id."""
+    google_event_id = item["id"]
+    start_at, end_at, all_day = _parse_times(item)
+    fields = {
+        "title": item.get("summary") or "(no title)",
+        "start_at": start_at,
+        "end_at": end_at,
+        "tz": (item.get("start") or {}).get("timeZone", _DEFAULT_TZ),
+        "all_day": all_day,
+        "location": item.get("location"),
+        "notes": item.get("description"),
+        "etag": item.get("etag"),
+    }
+    row = conn.execute("SELECT id FROM events WHERE google_event_id=?", (google_event_id,)).fetchone()
+    if row:
+        events_repo.update(conn, row[0], turn_id=turn_id, **fields)
+        return str(row[0])
+    fields["google_event_id"] = google_event_id
+    return str(events_repo.create(conn, turn_id=turn_id, **fields))
+
+
+def _soft_delete(conn: Connection, google_event_id: str, turn_id: str) -> None:
+    conn.execute(
+        "UPDATE events SET deleted_at=?, updated_at=? WHERE google_event_id=? AND deleted_at IS NULL",
+        (_now_utc(), _now_utc(), google_event_id),
+    )
+
+
+def _now_utc() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sync_calendar(
+    conn: Connection,
+    client: CalendarClient,
+    calendar_id: str,
+    window_past_days: int = 7,
+    window_future_days: int = 60,
+    turn_id: str = "google-sync",
+) -> dict:
+    """Sync one window of Google Calendar events into the local store.
+
+    Full sync (no stored sync token) uses [now - past, now + future].
+    Incremental sync uses the stored nextSyncToken and applies updates and
+    deletions. Returns counts.
+    """
+    now = datetime.now(UTC)
+    time_min = (now - timedelta(days=window_past_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = (now + timedelta(days=window_future_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    sync_token = settings_repo.get(conn, SYNC_TOKEN_KEY)
+    page_token = None
+    synced = deleted = 0
+    while True:
+        data = client.list_events(
+            calendar_id,
+            None if sync_token else time_min,
+            None if sync_token else time_max,
+            page_token=page_token,
+            sync_token=sync_token if page_token is None else None,
+        )
+        for item in data.get("items", []) or []:
+            if item.get("status") == "deleted":
+                _soft_delete(conn, item["id"], turn_id)
+                deleted += 1
+            else:
+                _upsert_event(conn, item, turn_id)
+                synced += 1
+        page_token = data.get("nextPageToken")
+        next_sync_token = data.get("nextSyncToken")
+        if next_sync_token:
+            sync_token = next_sync_token
+        if not page_token:
+            break
+    settings_repo.set(conn, SYNC_TOKEN_KEY, sync_token or "", turn_id=turn_id)
+    return {"synced": synced, "deleted": deleted}
