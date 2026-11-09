@@ -54,21 +54,8 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - email_draft (class B) — DONE (a9757cf); email_send class C prepare + pending_actions with 2-hour expiry — existed.
 - email_triage (class A, enum category/urgency/suggested_action via injected no-tools classifier, upsert to triage_results) — DONE (beba178), 5 tests.
 - Approvals view: code-built summaries, Approve/Reject, 2-hour expiry, payload re-verification, recipient highlighting (new addresses bold + "(new)") — DONE (a1b4339); screenshot eyeball at 150% is human_todo.md #6.
-- Phase 3.5 code-buildable work complete (search/read, drafts, triage, send/expiry/re-verify, approvals, injection test). Next: Phase 4.
+- Phase 4 — safe fetch fetch_url (integrations/fetch.py): HTTP(S) only; private/loopback/link-local IP blocking incl. on redirect targets (DNS rebinding); 1 MB cap; 10 s timeout; text/html|text/plain only; custom UA; max 3 redirects; trafilatura extraction; ~1,500-token truncation — DONE, 8 respx-mocked tests (tests/unit/integrations/test_fetch.py).
+- Next: research_brief (quarantined per-source summaries, brief write, citation check removing unmatched claims), research job with progress/caps.
 
-## Next: Phase 3.5 → 4 → 5 → 6 per plan §21 after Phase 3 code-buildable items.
-
-## Test count (resolves 156 vs ~117)
-- python -m pytest --collect-only : 124 collected items; python -m pytest -q : 124 passed.
-- The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3). Actual verified count: 124.
-
-## P2-08 (Settings autostart toggle) — DONE (code), 2026-11-09
-- src/secretary/autostart.py (NEW): Read/write the HKCU Run key value "Secretary" with data "<exe> --minimized", matching packaging/installer.iss (plan Appendix E); Windows-only, faked in tests.
-- src/secretary/controller/__init__.py: get_autostart() / set_autostart() delegate to autostart module.
-- src/secretary/ui/views/settings.py: real Settings view — General section + "Start Secretary at login" checkbox (accessible name "Start at login"), reflects true Run-key state, reverts on write failure; refresh_autostart() when the rail opens Settings.
-- src/secretary/ui/main_window.py: SettingsView(controller) wired; refresh on Settings rail selection.
-- tests/unit/test_autostart.py (6 tests), tests/ui/test_settings.py (5 tests), tests/ui/test_screenshots.py, tests/ui/test_contrast.py (token contrast both themes).
-- Verification: ruff ✓ | pytest 140 passed ✓ | lint-imports 7 kept/0 broken ✓.
-- Not automatable here: actual reboot autostart — covered by human_todo.md #3 (clean-profile install) and #6 (screenshot eyeball).
-
-## Next: Phase 3 (plan §21) — calendar/events repo + view already built; Google Calendar sync is HUMAN-GATED.
+## Test count (verified by running pytest, 2026-11-09)
+- python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
