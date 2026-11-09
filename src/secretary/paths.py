@@ -29,6 +29,11 @@ def config_path() -> Path:
     return data_root() / "config.toml"
 
 
+def credentials_path() -> Path:
+    """Google OAuth client secret (BYO), lives next to config.toml (plan §6.1)."""
+    return data_root() / "credentials.json"
+
+
 def db_path() -> Path:
     return data_root() / "secretary.db"
 

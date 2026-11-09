@@ -8,6 +8,16 @@ from __future__ import annotations
 
 import sys
 
+from .paths import credentials_path
+from .secrets import get_secret
+
+
+def _secret_present(key_name: str) -> bool:
+    try:
+        return get_secret(key_name) is not None
+    except Exception:
+        return False
+
 
 def run_diagnose() -> int:
     problems: list[str] = []
@@ -50,6 +60,24 @@ def run_diagnose() -> int:
         ok.append("tzdata present")
     except Exception as exc:
         problems.append(f"tzdata missing: {exc}")
+
+    # Google OAuth credentials file (never print its contents)
+    creds_path = credentials_path()
+    if creds_path.exists():
+        ok.append(f"Google credentials present: {creds_path}")
+    else:
+        problems.append(f"Google credentials missing: {creds_path}")
+
+    # LLM / Google API keys stored in Credential Manager (never print values)
+    for label, key_name in (
+        ("Groq API key", "llm_api_key:groq"),
+        ("Gemini API key", "llm_api_key:gemini"),
+        ("Google refresh token", "google_token"),
+    ):
+        if _secret_present(key_name):
+            ok.append(f"{label} present in Credential Manager")
+        else:
+            problems.append(f"{label} missing in Credential Manager ({key_name})")
 
     if problems:
         print("DIAGNOSE FAILED")

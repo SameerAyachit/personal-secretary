@@ -30,3 +30,14 @@ def test_ensure_dirs_creates_subdirs(monkeypatch, tmp_path):
     assert (tmp_path / "backups").is_dir()
     assert (tmp_path / "logs").is_dir()
     assert tmp_path.is_dir()
+
+
+def test_credentials_path_under_data_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    assert p.credentials_path() == tmp_path / "credentials.json"
+
+
+def test_credentials_path_defaults_to_localappdata(monkeypatch):
+    monkeypatch.delenv("SECRETARY_DATA_ROOT", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\tester\AppData\Local")
+    assert p.credentials_path() == Path(r"C:\Users\tester\AppData\Local\Secretary\credentials.json")
