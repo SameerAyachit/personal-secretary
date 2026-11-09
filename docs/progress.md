@@ -54,8 +54,10 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - email_draft (class B) — DONE (a9757cf); email_send class C prepare + pending_actions with 2-hour expiry — existed.
 - email_triage (class A, enum category/urgency/suggested_action via injected no-tools classifier, upsert to triage_results) — DONE (beba178), 5 tests.
 - Approvals view: code-built summaries, Approve/Reject, 2-hour expiry, payload re-verification, recipient highlighting (new addresses bold + "(new)") — DONE (a1b4339); screenshot eyeball at 150% is human_todo.md #6.
-- Phase 4 — safe fetch fetch_url (integrations/fetch.py): HTTP(S) only; private/loopback/link-local IP blocking incl. on redirect targets (DNS rebinding); 1 MB cap; 10 s timeout; text/html|text/plain only; custom UA; max 3 redirects; trafilatura extraction; ~1,500-token truncation — DONE, 8 respx-mocked tests (tests/unit/integrations/test_fetch.py).
-- Next: research_brief (quarantined per-source summaries, brief write, citation check removing unmatched claims), research job with progress/caps.
+## Phase 4 (plan §21), 2026-11-09
+- Safe fetch fetch_url (integrations/fetch.py) — DONE (e47bfc7), 8 respx-mocked tests.
+- research_brief (class A) — DONE (d3a3f49): plan queries → search (≤4 sources) → fetch/extract → quarantined per-source summaries → brief write → citation check removing unmatched claims; ≤8 LLM calls; partial/unavailable brief on search failure. 4 tests (tests/unit/tools/test_research.py).
+- Next: background research job with progress/caps (UI work, Phase 5).
 
 ## Test count (verified by running pytest, 2026-11-09)
 - python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
