@@ -224,7 +224,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
         "app", "llm", "tokens", "notifications", "pending_actions", "backup",
         "search", "research", "google",
     ):
-        section = getattr(data, section_name)
+        section = data[section_name]
         lines.append(f"[{section_name}]")
         for key, value in section.items():
             lines.append(f"{key} = {_toml_value(value)}")
@@ -238,4 +238,7 @@ def _toml_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, (int, float)):
         return str(value)
+    if isinstance(value, dict):
+        items = [f"{k} = {_toml_value(v)}" for k, v in value.items()]
+        return "{" + ", ".join(items) + "}"
     return f'"{value}"'

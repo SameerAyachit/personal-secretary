@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
@@ -18,6 +19,14 @@ from secretary.ui.theme import apply_theme
 from secretary.ui.views import approvals, chat, events, inbox, settings, tasks, today
 
 
+def _effective_theme(stored: str) -> str:
+    """Resolve the stored theme ("system" follows the Windows color scheme)."""
+    if stored != "system":
+        return stored
+    scheme = QGuiApplication.styleHints().colorScheme()
+    return "dark" if scheme == Qt.ColorScheme.Dark else "light"
+
+
 class MainWindow(QMainWindow):
     """Single Secretary window. Closing hides to tray; tray Quit is the only exit."""
 
@@ -27,8 +36,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Secretary")
         self.setMinimumSize(900, 600)
 
-        # Apply the light theme (dark/system switch wired in Settings, Phase 2).
-        apply_theme(self, "light")
+        stored = self._controller.get_config().get("theme", "light")
+        apply_theme(self, _effective_theme(stored))
 
         central = QWidget()
         self.setCentralWidget(central)

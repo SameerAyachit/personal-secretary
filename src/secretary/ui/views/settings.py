@@ -1,6 +1,6 @@
 """Settings view (plan §12.2).
 
-General page: timezone/startup read from the controller. The "Start at login"
+General page: theme and startup read from the controller. The "Start at login"
 checkbox is the Settings autostart toggle (plan §10.6, Appendix E): it adds or
 removes the ``Secretary`` value under the HKCU Run key; the checkbox always
 shows the true state read from that key.
@@ -10,14 +10,21 @@ from __future__ import annotations
 
 import contextlib
 
-from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
+)
 
 from secretary.controller import Controller
 from secretary.ui.theme import tokens
 
 
 class SettingsView(QWidget):
-    """Settings view: General page with the start-at-login autostart toggle."""
+    """Settings view: General page with theme and start-at-login autostart."""
 
     def __init__(self, controller: Controller) -> None:
         super().__init__()
@@ -48,6 +55,17 @@ class SettingsView(QWidget):
         section.setObjectName("Section")
         card_layout.addWidget(section)
 
+        self._theme = QComboBox()
+        self._theme.setAccessibleName("Theme")
+        self._theme.addItems(["System", "Light", "Dark"])
+        self._theme.setCurrentText(
+            {"light": "Light", "dark": "Dark"}.get(
+                self._controller.get_config().get("theme", "light"), "System"
+            )
+        )
+        self._theme.currentTextChanged.connect(self._on_theme_changed)
+        card_layout.addWidget(self._theme)
+
         self._autostart = QCheckBox("Start Secretary at login")
         self._autostart.setAccessibleName("Start at login")
         self._autostart.setToolTip(
@@ -66,6 +84,19 @@ class SettingsView(QWidget):
         """Re-read the Run key so the checkbox shows the true state."""
         with contextlib.suppress(Exception):
             self._autostart.setChecked(self._controller.get_autostart())
+
+    def _on_theme_changed(self, text: str) -> None:
+        mapping = {"System": "system", "Light": "light", "Dark": "dark"}
+        try:
+            self._controller.set_theme(mapping[text])
+        except Exception:
+            self._theme.blockSignals(True)
+            self._theme.setCurrentText(
+                {"system": "System", "light": "Light", "dark": "Dark"}.get(
+                    self._controller.get_config().get("theme", "light"), "System"
+                )
+            )
+            self._theme.blockSignals(False)
 
     def _on_autostart_toggled(self, checked: bool) -> None:
         try:

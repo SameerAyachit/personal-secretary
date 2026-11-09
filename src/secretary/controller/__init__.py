@@ -128,7 +128,14 @@ class Controller(QObject):
         return {
             "timezone": cfg.app.timezone,
             "start_minimized": cfg.app.start_minimized,
+            "theme": cfg.app.theme,
         }
+
+    def set_theme(self, theme: str) -> None:
+        """Persist the UI theme (system|light|dark)."""
+        cfg = load_config()
+        cfg.app.theme = theme
+        save_config(cfg)
 
     def save_general(self, timezone: str, start_minimized: bool) -> None:
         cfg = load_config()
