@@ -9,17 +9,21 @@ shows the true state read from that key.
 from __future__ import annotations
 
 import contextlib
+import io
 
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
     QLabel,
+    QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from secretary.controller import Controller
+from secretary.diagnose import run_diagnose
 from secretary.ui.theme import tokens
 
 
@@ -76,9 +80,21 @@ class SettingsView(QWidget):
         self._autostart.toggled.connect(self._on_autostart_toggled)
         card_layout.addWidget(self._autostart)
 
+        self._diagnose = QPushButton("Run diagnostics")
+        self._diagnose.setAccessibleName("Run diagnostics")
+        self._diagnose.clicked.connect(self._run_diagnostics)
+        card_layout.addWidget(self._diagnose)
+
         card_layout.addStretch()
         layout.addWidget(card)
         layout.addStretch()
+
+    def _run_diagnostics(self) -> None:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = run_diagnose()
+        title = "Diagnostics — OK" if code == 0 else "Diagnostics — problems found"
+        QMessageBox.information(self, title, buf.getvalue() or "(no output)")
 
     def refresh_autostart(self) -> None:
         """Re-read the Run key so the checkbox shows the true state."""
