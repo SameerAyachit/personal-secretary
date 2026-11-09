@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import UTC, datetime, timedelta
@@ -100,6 +101,8 @@ async def _execute_call(call: ToolCall, registry: Registry, conn, turn_id: str) 
 
     if spec.fn is None:
         return {"error": f"tool {call.name} not implemented"}
+    if asyncio.iscoroutinefunction(spec.fn):
+        return await spec.fn(conn, turn_id, args)
     return spec.fn(conn, turn_id, args)
 
 

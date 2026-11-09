@@ -22,6 +22,7 @@ from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
 from secretary.tools import planning as planning_tools
 from secretary.tools import registry as tools_registry
+from secretary.tools import research as research_tools
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
 
@@ -70,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         email_tools.register(registry)
         events_tools.register(registry)
         planning_tools.register(registry)
+        research_tools.register(registry)
         router = Router(registry)
         router.route("tasks_add", ["task", "create", "add", "remind"])
         router.route("tasks_list", ["task", "list", "show", "remind"])
@@ -79,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         router.route("event_create", ["event", "calendar", "meeting", "appointment"])
         router.route("event_list", ["events", "calendar", "schedule", "agenda"])
         router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
+        router.route("research_brief", ["research", "brief", "summarize"])
 
         # LLM provider, limiter.
         llm = None
@@ -88,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
             llm = OpenAICompatClient(base_url="https://api.groq.com/openai/v1", api_key=key, model="llama-3.1-8b-instant")
             limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
         controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+        conn.llm = llm  # research_brief uses it; None when no LLM key is configured
         window = MainWindow(controller)
 
         # Search provider + cache + breaker.
