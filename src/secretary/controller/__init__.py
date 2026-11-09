@@ -9,6 +9,7 @@ Controller, which is allowed to import ``store`` per the layering contract.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -22,6 +23,7 @@ from secretary.secrets import get_secret, set_secret
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import tasks as tasks_repo
@@ -233,12 +235,70 @@ class Controller(QObject):
 
     @Slot(str)
     def approve_action(self, action_id: str) -> None:
-        pa_repo.decide(self.conn, int(action_id), "approved", turn_id="manual")
-        self.approvals_changed.emit()
-        self.turn_status.emit("Action approved.")
+        try:
+            pending_id = int(action_id)
+        except ValueError:
+            return
+        pa = pa_repo.get(self.conn, pending_id)
+        if pa is None or pa["status"] != "waiting":
+            return
+        now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if pa["expires_at"] <= now_iso:
+            # Refuse to approve expired actions (plan §3.5, §995).
+            pa_repo.decide(self.conn, pending_id, "expired", turn_id="manual")
+            self.approvals_changed.emit()
+            self.turn_status.emit("Action expired: it can no longer be approved.")
+            return
+        if pa["kind"] == "email.send":
+            self._execute_send(pa)
+        else:
+            pa_repo.decide(self.conn, pending_id, "approved", turn_id="manual")
+            self.approvals_changed.emit()
+            self.turn_status.emit("Action approved.")
 
     @Slot(str)
     def reject_action(self, action_id: str) -> None:
         pa_repo.decide(self.conn, int(action_id), "rejected", turn_id="manual")
         self.approvals_changed.emit()
         self.turn_status.emit("Action rejected.")
+
+    def _execute_send(self, pa: dict) -> None:
+        """Send an approved email draft after payload re-verification (plan §3.5).
+
+        Re-fetches the draft at send time and compares recipients/subject/body
+        against the snapshot approved earlier; refuses on any change. No real
+        transport exists yet (Gmail send is human-gated), so execution is
+        recorded as the pending action reaching "executed".
+        """
+        pending_id = int(pa["id"])
+        try:
+            payload = json.loads(pa["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        draft_ref = payload.get("draft_ref")
+        approved = {key: payload.get(key) for key in ("to", "subject", "body")}
+        try:
+            draft_id = int(draft_ref)
+        except (TypeError, ValueError):
+            draft_id = None
+        message = messages_repo.get(self.conn, draft_id) if draft_id is not None else None
+        changed = (
+            message is None
+            or message.get("source") != "draft"
+            or message.get("to_addrs") != approved.get("to")
+            or message.get("subject") != approved.get("subject")
+            or message.get("body") != approved.get("body")
+        )
+        if changed:
+            pa_repo.decide(
+                self.conn,
+                pending_id,
+                "failed",
+                turn_id="manual",
+                result_json=json.dumps({"reason": "draft changed since approval"}),
+            )
+            self.turn_status.emit("Send refused: draft changed since approval.")
+        else:
+            pa_repo.decide(self.conn, pending_id, "executed", turn_id="manual")
+            self.turn_status.emit("Email sent.")
+        self.approvals_changed.emit()

@@ -63,6 +63,10 @@ async def test_injected_email_is_untrusted_data_and_cannot_send():
             conn, from_addr="attacker@example.com", to_addrs='["me@example.com"]',
             subject="Re: lab report", body=injected_body,
             received_at="2026-11-09T08:00:00+00:00", turn_id="seed")
+        draft_id = messages_repo.create(
+            conn, from_addr="me@example.com", to_addrs='["victim@example.com"]',
+            subject="Draft to victim", body="Please pay the attached invoice.",
+            received_at="2026-11-09T08:30:00+00:00", source="draft", turn_id="seed-draft")
 
         llm = FakeLLM([
             # Step 1: search finds the message.
@@ -71,7 +75,7 @@ async def test_injected_email_is_untrusted_data_and_cannot_send():
             # Step 2: the injection tries to make the assistant send mail.
             LLMResponse(text="", tool_calls=[ToolCall(call_id="c2", name="email_read", args={"message_ref": "1"})],
                         usage={}, headers={}, model="fake"),
-            LLMResponse(text="", tool_calls=[ToolCall(call_id="c3", name="email_send", args={"draft_ref": "999"})],
+            LLMResponse(text="", tool_calls=[ToolCall(call_id="c3", name="email_send", args={"draft_ref": str(draft_id)})],
                         usage={}, headers={}, model="fake"),
             LLMResponse(text="I have prepared that for your approval in the Approvals view.",
                         tool_calls=[], usage={}, headers={}, model="fake"),
@@ -81,7 +85,7 @@ async def test_injected_email_is_untrusted_data_and_cannot_send():
 
         # The send was prepared for approval, never executed.
         waiting = pa_repo.list_waiting(conn, now_iso="2020-01-01T00:00:00Z")
-        sends = [p for p in waiting if p["kind"] == "email_send"]
+        sends = [p for p in waiting if p["kind"] == "email.send"]
         assert len(sends) == 1
         assert sends[0]["status"] == "waiting"
         assert "approval" in result.lower()

@@ -77,6 +77,10 @@ async def _execute_call(call: ToolCall, registry: Registry, conn, turn_id: str) 
 
     if spec.safety_class == SafetyClass.C:
         # Class C: never execute from the LLM turn; prepare a pending_action for approval.
+        # Tools with an fn (e.g. email_send) build the pending action themselves
+        # so they can store a snapshot for payload re-verification at execution.
+        if spec.fn is not None:
+            return spec.fn(conn, turn_id, args)
         expires_at = (datetime.now(UTC) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
         summary = f"{call.name}: {json.dumps(args)[:120]}"
         pa_repo.create(

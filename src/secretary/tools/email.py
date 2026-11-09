@@ -181,11 +181,28 @@ class EmailSendArgs(BaseModel):
 
 
 def email_send_prepare(conn: Connection, turn_id: str, args: dict) -> dict:
-    """Prepare a Class C send for approval; does NOT send (plan §8.2)."""
+    """Prepare a Class C send for approval; does NOT send (plan §8.2).
+
+    The draft snapshot (recipients, subject, body) is stored in the pending
+    action payload so execution can re-fetch and compare it (payload
+    re-verification, plan §3.5).
+    """
     parsed = EmailSendArgs(**args)
+    try:
+        draft_id = int(parsed.draft_ref)
+    except ValueError:
+        return {"error": "draft_ref must be a draft id (integer)"}
+    draft = messages_repo.get(conn, draft_id)
+    if draft is None or draft.get("source") != "draft":
+        return {"error": "draft not found"}
     expires_at = (datetime.now(UTC) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    payload = {"draft_ref": parsed.draft_ref}
-    summary = f"Send email draft {parsed.draft_ref}"
+    payload = {
+        "draft_ref": parsed.draft_ref,
+        "to": draft["to_addrs"],
+        "subject": draft["subject"],
+        "body": draft["body"],
+    }
+    summary = f"Send email draft {parsed.draft_ref} to {draft['from_addr']}"
     pending_id = pa_repo.create(
         conn,
         kind="email.send",
