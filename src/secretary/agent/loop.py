@@ -175,6 +175,10 @@ async def run_turn(
                     ],
                 }
             )
+            content = json.dumps(result)[:TOOL_RESULT_BUDGET]
+            spec = registry.get(call.name)
+            if spec is not None and spec.group == "email":
+                content = f'<untrusted source="email">{content}</untrusted>'
             messages.append(
-                {"role": "tool", "content": json.dumps(result)[:TOOL_RESULT_BUDGET], "tool_call_id": call.call_id}
+                {"role": "tool", "content": content, "tool_call_id": call.call_id}
             )
