@@ -61,7 +61,8 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 
 ## Phase 5 (plan §21), started 2026-11-09
 - Settings theme toggle (system/light/dark; follows Windows color scheme) — DONE (7e2bf0d); also fixed save_config to handle nested tables.
-- Next: empty/error/offline states for all views, accessibility pass, diagnostics screen, remaining screenshots (human_todo.md #6).
+- Empty states for list views (Tasks, Inbox, Calendar/Events, Today reminders, Approvals) — DONE (4a79335) via new ui/widgets/empty_state.py.
+- Next: accessibility pass, diagnostics screen, remaining screenshots (human_todo.md #6).
 
 ## Test count (verified by running pytest, 2026-11-09)
 - python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
