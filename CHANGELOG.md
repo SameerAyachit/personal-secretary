@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Calendar: event_create class-B conflict warnings (overlaps warned before insert), all-day events, plan_day (free slots 09:00–17:00 local).
+- Email (Phase 3.5): email_search/email_read (quarantined reads), email_triage (enum category/urgency/suggested_action), email_draft, email_send approval with 2-hour expiry and payload re-verification, prompt-injection test proving injected email cannot cause a send.
+- Search/research (Phase 4): safe fetch (SSRF-safe, 1 MB cap, text/html|text/plain only, max 3 redirects, trafilatura extraction), research_brief pipeline with quarantined per-source summaries and citation check removing unmatched claims.
+- UI (Phase 5): Settings theme toggle (system/light/dark following Windows color scheme), Settings autostart Run-key toggle, Settings diagnostics button, empty states for all list views, screenshots for all views in light and dark.
+- Store: migration 005 (email_messages), migration 006 (triage_results).
+- Tests: 193 passed; import-linter 7 kept, 0 broken; FakeLLM eval 100%.
+
+### Fixed
+- config.save_config wrote nested dicts as strings (broke config reload).
+- SearchCache used bare COMMIT on an isolation_level=None connection (crashed startup).
+- lint-imports config location (now read from pyproject.toml).
+
 ## [0.1.0] - 2026-11-08
 
 ### Added
