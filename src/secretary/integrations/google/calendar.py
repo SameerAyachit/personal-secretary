@@ -27,6 +27,10 @@ class GoogleCalendarError(Exception):
     """Raised when a Calendar API call fails."""
 
 
+class GoogleCalendarSyncTokenInvalid(GoogleCalendarError):
+    """Raised when the nextSyncToken is invalid (HTTP 410); a full resync is required."""
+
+
 class CalendarClient:
     """Thin client over Google Calendar v3 ``events.list``."""
 
@@ -59,6 +63,12 @@ class CalendarClient:
                 url, params=params, headers=self._auth.auth_header(), timeout=30.0
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 410:
+                raise GoogleCalendarSyncTokenInvalid(
+                    "nextSyncToken is invalid; full resync required"
+                ) from exc
+            raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
         except httpx.HTTPError as exc:
             raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
         return response.json()
@@ -102,8 +112,11 @@ def _upsert_event(conn: Connection, item: dict, turn_id: str) -> str:
         "notes": item.get("description"),
         "etag": item.get("etag"),
     }
-    row = conn.execute("SELECT id FROM events WHERE google_event_id=?", (google_event_id,)).fetchone()
+    row = conn.execute("SELECT id, etag FROM events WHERE google_event_id=?", (google_event_id,)).fetchone()
     if row:
+        # Skip the write when the etag is unchanged (no-op sync for this event).
+        if row[1] is not None and row[1] == fields.get("etag"):
+            return None
         events_repo.update(conn, row[0], turn_id=turn_id, **fields)
         return str(row[0])
     fields["google_event_id"] = google_event_id
@@ -142,21 +155,32 @@ def sync_calendar(
     sync_token = settings_repo.get(conn, SYNC_TOKEN_KEY)
     page_token = None
     synced = deleted = 0
+    retried = False
     while True:
-        data = client.list_events(
-            calendar_id,
-            None if sync_token else time_min,
-            None if sync_token else time_max,
-            page_token=page_token,
-            sync_token=sync_token if page_token is None else None,
-        )
+        try:
+            data = client.list_events(
+                calendar_id,
+                None if sync_token else time_min,
+                None if sync_token else time_max,
+                page_token=page_token,
+                sync_token=sync_token if page_token is None else None,
+            )
+        except GoogleCalendarSyncTokenInvalid:
+            if retried:
+                raise
+            # Stale sync token: discard it and do a full time-window resync.
+            retried = True
+            sync_token = None
+            page_token = None
+            continue
         for item in data.get("items", []) or []:
             if item.get("status") == "deleted":
                 _soft_delete(conn, item["id"], turn_id)
                 deleted += 1
             else:
-                _upsert_event(conn, item, turn_id)
-                synced += 1
+                result = _upsert_event(conn, item, turn_id)
+                if result is not None:
+                    synced += 1
         page_token = data.get("nextPageToken")
         next_sync_token = data.get("nextSyncToken")
         if next_sync_token:

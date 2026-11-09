@@ -9,7 +9,11 @@ import httpx
 
 import secretary.integrations.google.auth as auth_module
 from secretary.integrations.google.auth import GoogleAuth, GoogleAuthError
-from secretary.integrations.google.calendar import CalendarClient, sync_calendar
+from secretary.integrations.google.calendar import (
+    CalendarClient,
+    GoogleCalendarSyncTokenInvalid,
+    sync_calendar,
+)
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import events as events_repo
@@ -154,5 +158,140 @@ def test_sync_requires_refresh_token(respx_mock):
         else:  # pragma: no cover - defensive
             raise AssertionError("expected GoogleAuthError")
         assert route.call_count == 0
+    finally:
+        conn.close()
+
+
+def test_sync_410_triggers_full_resync(respx_mock, monkeypatch):
+    """A 410 on an incremental (syncToken) request must fall back to a full
+    time-window sync and persist the new nextSyncToken."""
+    conn = _conn()
+    try:
+        events_repo.create(
+            conn, title="Old event", start_at="2026-11-09T04:30:00+00:00",
+            end_at="2026-11-09T05:30:00+00:00", tz="Asia/Kolkata",
+            google_event_id="evt-old", etag="etag-0", turn_id="s",
+        )
+        settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
+
+        monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
+        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
+        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
+        respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
+        )
+
+        full_page = {
+            "kind": "calendar#events",
+            "items": [
+                {"id": "evt-old", "status": "deleted"},
+                {
+                    "id": "evt-new", "status": "confirmed", "etag": "etag-new",
+                    "summary": "Resynced event",
+                    "start": {"dateTime": "2026-11-10T04:30:00Z", "timeZone": "Asia/Kolkata"},
+                    "end": {"dateTime": "2026-11-10T05:30:00Z", "timeZone": "Asia/Kolkata"},
+                },
+            ],
+            "nextPageToken": None,
+            "nextSyncToken": "tok-new",
+        }
+        seen_params = []
+
+        def calendar_handler(request):
+            seen_params.append(request.url.params.get("syncToken"))
+            if seen_params[-1] is not None:  # incremental request with a token -> 410
+                return httpx.Response(410)
+            return httpx.Response(200, json=full_page)
+
+        route = respx_mock.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        ).mock(side_effect=calendar_handler)
+
+        auth = GoogleAuth("cid", "secret")
+        result = sync_calendar(conn, CalendarClient(auth), "primary")
+        assert result == {"synced": 1, "deleted": 1}
+
+        # First call used the (now-stale) sync token -> 410; second used none -> full.
+        assert seen_params == ["tok-old", None]
+        assert route.call_count == 2
+
+        rows = events_repo.list_window(conn, start_at="2026-01-01T00:00:00+00:00", end_at="2027-01-01T00:00:00+00:00")
+        titles = {r["title"] for r in rows if r["deleted_at"] is None}
+        assert titles == {"Resynced event"}
+        new_event = next(r for r in rows if r["google_event_id"] == "evt-new")
+        assert new_event["etag"] == "etag-new"
+        raw_old = conn.execute(
+            "SELECT deleted_at FROM events WHERE google_event_id=?", ("evt-old",)
+        ).fetchone()
+        assert raw_old is not None and raw_old[0] is not None  # deleted via full resync
+        assert settings_repo.get(conn, "google_sync_token") == "tok-new"
+    finally:
+        conn.close()
+
+
+def test_sync_410_persists_after_retry(respx_mock, monkeypatch):
+    """Two consecutive 410s must propagate as an error (no infinite retry)."""
+    conn = _conn()
+    try:
+        settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
+        monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
+        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
+        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
+        respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
+        )
+        respx_mock.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        ).mock(return_value=httpx.Response(410))
+
+        auth = GoogleAuth("cid", "secret")
+        try:
+            sync_calendar(conn, CalendarClient(auth), "primary")
+        except GoogleCalendarSyncTokenInvalid:
+            pass
+        else:  # pragma: no cover - defensive
+            raise AssertionError("expected GoogleCalendarSyncTokenInvalid")
+    finally:
+        conn.close()
+
+
+def test_sync_skips_unchanged_etag(respx_mock, monkeypatch):
+    """Re-syncing an event whose etag is unchanged must skip the write."""
+    conn = _conn()
+    try:
+        monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
+        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
+        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
+        respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
+        )
+        page = {
+            "kind": "calendar#events",
+            "items": [
+                {
+                    "id": "evt-1", "status": "confirmed", "etag": "etag-1",
+                    "summary": "Unchanged event",
+                    "start": {"dateTime": "2026-11-10T04:30:00Z", "timeZone": "Asia/Kolkata"},
+                    "end": {"dateTime": "2026-11-10T05:30:00Z", "timeZone": "Asia/Kolkata"},
+                },
+            ],
+            "nextPageToken": None,
+            "nextSyncToken": "tok-1",
+        }
+        respx_mock.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        ).mock(return_value=httpx.Response(200, json=page))
+
+        auth = GoogleAuth("cid", "secret")
+        client = CalendarClient(auth)
+        r1 = sync_calendar(conn, client, "primary")
+        assert r1 == {"synced": 1, "deleted": 0}
+
+        # Same payload again: etag unchanged, so nothing is written.
+        r2 = sync_calendar(conn, client, "primary")
+        assert r2 == {"synced": 0, "deleted": 0}
+
+        rows = events_repo.list_window(conn, start_at="2026-01-01T00:00:00+00:00", end_at="2027-01-01T00:00:00+00:00")
+        assert [r["title"] for r in rows] == ["Unchanged event"]
     finally:
         conn.close()
