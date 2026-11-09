@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from secretary.config import load_config
 from secretary.controller import Controller
+from secretary.ui.theme import apply_theme, resolve_theme
 from secretary.ui.views.settings import SettingsView
 
 
@@ -73,3 +74,36 @@ def test_theme_round_trip(qapp, monkeypatch, tmp_path):
     assert load_config().app.theme == "dark"
     view._theme.setCurrentText("System")
     assert load_config().app.theme == "system"
+
+
+def test_resolve_theme_modes():
+    assert resolve_theme("light") == "light"
+    assert resolve_theme("dark") == "dark"
+    assert resolve_theme("system") in ("light", "dark")
+
+
+def test_apply_theme_regenerates_qss(qapp):
+    app = QApplication.instance()
+    apply_theme(app, "light")
+    light_sheet = app.styleSheet()
+    assert "#F5F6F8" in light_sheet  # light background
+
+    apply_theme(app, "dark")
+    dark_sheet = app.styleSheet()
+    assert "#14171B" in dark_sheet  # dark background
+    assert "#F5F6F8" not in dark_sheet  # light background replaced
+
+
+def test_theme_change_reapplies_qss(qapp, monkeypatch, tmp_path):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    controller = Controller(_DummyConn())
+    view = SettingsView(controller)
+    view._theme.setCurrentText("Dark")
+
+    sheet = QApplication.instance().styleSheet()
+    assert "#14171B" in sheet  # dark theme applied immediately
+
+    view._theme.setCurrentText("Light")
+    sheet = QApplication.instance().styleSheet()
+    assert "#F5F6F8" in sheet  # light theme re-applied immediately
+    assert "#14171B" not in sheet  # dark background removed

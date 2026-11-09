@@ -13,6 +13,7 @@ import io
 
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from secretary.controller import Controller
 from secretary.diagnose import run_diagnose
-from secretary.ui.theme import tokens
+from secretary.ui.theme import apply_theme, resolve_theme, tokens
 
 
 class SettingsView(QWidget):
@@ -153,8 +154,9 @@ class SettingsView(QWidget):
 
     def _on_theme_changed(self, text: str) -> None:
         mapping = {"System": "system", "Light": "light", "Dark": "dark"}
+        theme = mapping[text]
         try:
-            self._controller.set_theme(mapping[text])
+            self._controller.set_theme(theme)
         except Exception:
             self._theme.blockSignals(True)
             self._theme.setCurrentText(
@@ -163,6 +165,9 @@ class SettingsView(QWidget):
                 )
             )
             self._theme.blockSignals(False)
+            return
+        # Regenerate and re-apply the QSS so the change takes effect immediately.
+        apply_theme(QApplication.instance(), resolve_theme(theme))
 
     def _on_autostart_toggled(self, checked: bool) -> None:
         try:

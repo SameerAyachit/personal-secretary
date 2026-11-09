@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QListWidget,
     QListWidgetItem,
@@ -15,16 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from secretary.controller import Controller
-from secretary.ui.theme import apply_theme
+from secretary.ui.theme import apply_theme, resolve_theme
 from secretary.ui.views import approvals, chat, events, inbox, settings, tasks, today
-
-
-def _effective_theme(stored: str) -> str:
-    """Resolve the stored theme ("system" follows the Windows color scheme)."""
-    if stored != "system":
-        return stored
-    scheme = QGuiApplication.styleHints().colorScheme()
-    return "dark" if scheme == Qt.ColorScheme.Dark else "light"
 
 
 class MainWindow(QMainWindow):
@@ -37,7 +30,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
 
         stored = self._controller.get_config().get("theme", "light")
-        apply_theme(self, _effective_theme(stored))
+        apply_theme(QApplication.instance(), resolve_theme(stored))
+
+        # Follow the Windows color scheme while the app runs ("system" theme).
+        QGuiApplication.styleHints().colorSchemeChanged.connect(
+            self._on_system_theme_changed
+        )
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -78,6 +76,12 @@ class MainWindow(QMainWindow):
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
         self._controller.inbox_changed.connect(lambda: None)
+
+    def _on_system_theme_changed(self, scheme: Qt.ColorScheme) -> None:
+        """Re-apply the theme when Windows changes its color scheme ("system")."""
+        stored = self._controller.get_config().get("theme", "light")
+        if stored == "system":
+            apply_theme(QApplication.instance(), resolve_theme(stored))
 
     def tray_icon(self):
         return self._tray

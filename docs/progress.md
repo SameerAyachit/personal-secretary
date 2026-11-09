@@ -64,7 +64,7 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - Next: background research job with progress/caps (UI work, Phase 5).
 
 ## Phase 5 (plan §21), started 2026-11-09
-- Settings theme toggle (system/light/dark; follows Windows color scheme) — DONE (7e2bf0d); also fixed save_config to handle nested tables.
+- Settings theme toggle (system/light/dark; follows Windows color scheme) — DONE (7e2bf0d); also fixed save_config to handle nested tables. BUG 3 FIXED: theme changes now regenerate and re-apply QSS immediately (resolve_theme moved to ui/theme/__init__.py; SettingsView._on_theme_changed re-applies apply_theme to QApplication.instance(); main_window applies theme at startup and re-applies when Windows color scheme changes via colorSchemeChanged). Tests in tests/ui/test_settings.py.
 - Empty states for list views (Tasks, Inbox, Calendar/Events, Today reminders, Approvals) — DONE (4a79335) via new ui/widgets/empty_state.py.
 - Accessibility pass — DONE: contrast test (tests/ui/test_contrast.py), QSS focus rings, accessible names on buttons, tab-order checks in tests/ui/test_screenshots.py.
 - Diagnostics screen — DONE (a459468): Settings "Run diagnostics" button runs run_diagnose() and shows the report.
@@ -77,4 +77,4 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - Phase 6 remaining (mostly human-gated/packaging): code signing, final installer, screenshots GIF, demo video, GitHub Release v1.0.0.
 
 ## Test count (verified by running pytest, 2026-11-09)
-- python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
+- python -m pytest --collect-only : 232 collected items; python -m pytest -q : 232 passed.
