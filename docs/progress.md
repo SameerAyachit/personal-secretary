@@ -65,8 +65,9 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - Accessibility pass — DONE: contrast test (tests/ui/test_contrast.py), QSS focus rings, accessible names on buttons, tab-order checks in tests/ui/test_screenshots.py.
 - Diagnostics screen — DONE (a459468): Settings "Run diagnostics" button runs run_diagnose() and shows the report.
 - Screenshots — DONE (tests/ui/test_screenshots.py, docs/screenshots/*.png): all 11 views in light and dark; eyeball at 150% is human_todo.md #6.
-- Remaining Phase 5: delete-all-data/restore UX, memory facts UI, performance pass, soak test (human-gated time).
-- Next: Phase 6 docs (CHANGELOG, PRIVACY, README with GIF).
+- Remaining Phase 5 (code-buildable but larger): delete-all-data/restore UX, memory facts UI, performance pass, long-run soak test.
+- Phase 6 docs — DONE: README.md, PRIVACY.md, CHANGELOG unreleased section (ad75a76).
+- Phase 6 remaining (mostly human-gated/packaging): code signing, final installer, screenshots GIF, demo video, GitHub Release v1.0.0.
 
 ## Test count (verified by running pytest, 2026-11-09)
 - python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
