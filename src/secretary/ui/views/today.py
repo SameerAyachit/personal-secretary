@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from secretary.ui.widgets.empty_state import EmptyState
+
 
 class TodayView(QWidget):
     """Today's reminders, approvals, "while you were away" card, due tasks, quick-add."""
@@ -47,10 +49,12 @@ class TodayView(QWidget):
 
         # Reminders section.
         layout.addWidget(QLabel("Reminders"))
-        self._reminders_label = QLabel("No unacknowledged reminders.")
-        layout.addWidget(self._reminders_label)
         self._reminders_list = QListWidget()
         layout.addWidget(self._reminders_list)
+
+        self._reminders_empty = EmptyState("No unacknowledged reminders.")
+        self._reminders_empty.hide()
+        layout.addWidget(self._reminders_empty)
 
         # While you were away card.
         self._away_card = QLabel()
@@ -74,15 +78,14 @@ class TodayView(QWidget):
 
         # Reminders (unacknowledged).
         reminders = [r for r in inbox if r.get("kind") == "reminder"]
+        has_reminders = bool(reminders)
+        self._reminders_list.setVisible(has_reminders)
+        self._reminders_empty.setVisible(not has_reminders)
         self._reminders_list.clear()
         for r in reminders:
             item = QListWidgetItem(f"{r['title']} — {r['body']}")
             item.setData(Qt.UserRole, r["id"])
             self._reminders_list.addItem(item)
-        if reminders:
-            self._reminders_label.setText(f"{len(reminders)} unacknowledged reminder(s):")
-        else:
-            self._reminders_label.setText("No unacknowledged reminders.")
 
         # While you were away card.
         aways = [r for r in inbox if r.get("kind") == "while_away"]

@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from secretary.ui.widgets.empty_state import EmptyState
+
 
 class TasksView(QWidget):
     """Lists open tasks and offers a manual quick-add field."""
@@ -29,6 +31,10 @@ class TasksView(QWidget):
         self._list.setAlternatingRowColors(True)
         layout.addWidget(self._list)
 
+        self._empty = EmptyState("No tasks yet.", "Add a task", self._input_focus)
+        self._empty.hide()
+        layout.addWidget(self._empty)
+
         add_row = QHBoxLayout()
         self._input = QLineEdit()
         self._input.setPlaceholderText("Quick-add a task (e.g. \"buy groceries\")")
@@ -43,17 +49,23 @@ class TasksView(QWidget):
         self._controller.tasks_changed.connect(self.refresh)
         self.refresh()
 
+    def _input_focus(self) -> None:
+        self._input.setFocus()
+
     @Slot()
     def refresh(self) -> None:
-        self._list.clear()
         try:
             rows = self._controller.list_tasks()
-            for row in rows:
-                item = QListWidgetItem(row["title"])
-                item.setData(Qt.UserRole, row["id"])
-                self._list.addItem(item)
         except Exception:
-            pass
+            rows = []
+        has_rows = bool(rows)
+        self._list.setVisible(has_rows)
+        self._empty.setVisible(not has_rows)
+        self._list.clear()
+        for row in rows:
+            item = QListWidgetItem(row["title"])
+            item.setData(Qt.UserRole, row["id"])
+            self._list.addItem(item)
 
     @Slot()
     def _on_add(self) -> None:

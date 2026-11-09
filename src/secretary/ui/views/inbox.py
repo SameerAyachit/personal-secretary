@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from secretary.ui.widgets.empty_state import EmptyState
+
 
 class InboxView(QWidget):
     """Lists inbox items and lets the user acknowledge, snooze or done them."""
@@ -36,15 +38,22 @@ class InboxView(QWidget):
         self._list = QListWidget()
         layout.addWidget(self._list)
 
+        self._empty = EmptyState("No unacknowledged inbox items.")
+        self._empty.hide()
+        layout.addWidget(self._empty)
+
         self._controller.inbox_changed.connect(self.refresh)
         self.refresh()
 
     def refresh(self) -> None:
-        self._list.clear()
         try:
             rows = self._controller.list_inbox()
         except Exception:
             rows = []
+        has_rows = bool(rows)
+        self._list.setVisible(has_rows)
+        self._empty.setVisible(not has_rows)
+        self._list.clear()
         for row in rows:
             item = QListWidgetItem(f"{row['title']}\n{row['body']}")
             item.setData(Qt.UserRole, row["id"])
