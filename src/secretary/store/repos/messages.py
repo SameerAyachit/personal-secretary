@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 from ._base import action_log, now_utc, row_to_dict
+
+logger = logging.getLogger(__name__)
+
+TRIAGE_CATEGORIES = ("personal", "work", "newsletter", "invoice", "spam")
+TRIAGE_URGENCIES = ("low", "normal", "high")
+TRIAGE_ACTIONS = ("reply", "archive", "read", "ignore")
 
 
 def create(
@@ -68,3 +75,43 @@ def mark_read(con: sqlite3.Connection, message_id: int) -> bool:
         (now_utc(), message_id),
     )
     return cur.rowcount > 0
+
+
+def upsert_triage_result(
+    con: sqlite3.Connection,
+    message_id: int,
+    category: str,
+    urgency: str,
+    suggested_action: str,
+    turn_id: str | None = None,
+) -> None:
+    """Insert or replace the triage result for one message (enum-validated)."""
+    if category not in TRIAGE_CATEGORIES:
+        raise ValueError(f"unknown triage category: {category!r}")
+    if urgency not in TRIAGE_URGENCIES:
+        raise ValueError(f"unknown triage urgency: {urgency!r}")
+    if suggested_action not in TRIAGE_ACTIONS:
+        raise ValueError(f"unknown triage action: {suggested_action!r}")
+    now = now_utc()
+    con.execute(
+        "INSERT INTO triage_results(message_id, category, urgency, suggested_action, created_at) "
+        "VALUES(?,?,?,?,?) "
+        "ON CONFLICT(message_id) DO UPDATE SET category=excluded.category, "
+        "urgency=excluded.urgency, suggested_action=excluded.suggested_action, "
+        "created_at=excluded.created_at",
+        (message_id, category, urgency, suggested_action, now),
+    )
+    action_log(con, turn_id, "updated", "triage_result", message_id,
+               {"category": category, "urgency": urgency, "suggested_action": suggested_action})
+
+
+def list_triage_results(con: sqlite3.Connection, limit: int = 50) -> list[dict]:
+    cur = con.execute(
+        "SELECT m.id, m.from_addr, m.subject, m.received_at, t.category, t.urgency, "
+        "t.suggested_action, t.created_at "
+        "FROM triage_results t JOIN email_messages m ON m.id = t.message_id "
+        "WHERE m.deleted_at IS NULL "
+        "ORDER BY m.received_at DESC LIMIT ?",
+        (limit,),
+    )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
