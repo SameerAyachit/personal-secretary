@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
             "Calendar": events.EventsView(controller),
             "Inbox": inbox.InboxView(controller),
             "Approvals": approvals.ApprovalsView(controller),
-            "Settings": settings.SettingsView(),
+            "Settings": settings.SettingsView(controller),
         }
         for view in self._views.values():
             self._stack.addWidget(view)
@@ -79,6 +79,8 @@ class MainWindow(QMainWindow):
         label = item.data(Qt.UserRole)
         view = self._views.get(label)
         if view is not None:
+            if label == "Settings":
+                view.refresh_autostart()
             self._stack.setCurrentWidget(view)
 
     def hide_to_tray(self) -> None:

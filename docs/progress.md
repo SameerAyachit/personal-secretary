@@ -51,4 +51,13 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - python -m pytest --collect-only : 124 collected items; python -m pytest -q : 124 passed.
 - The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3). Actual verified count: 124.
 
+## P2-08 (Settings autostart toggle) — DONE (code), 2026-11-09
+- src/secretary/autostart.py (NEW): Read/write the HKCU Run key value "Secretary" with data "<exe> --minimized", matching packaging/installer.iss (plan Appendix E); Windows-only, faked in tests.
+- src/secretary/controller/__init__.py: get_autostart() / set_autostart() delegate to autostart module.
+- src/secretary/ui/views/settings.py: real Settings view — General section + "Start Secretary at login" checkbox (accessible name "Start at login"), reflects true Run-key state, reverts on write failure; refresh_autostart() when the rail opens Settings.
+- src/secretary/ui/main_window.py: SettingsView(controller) wired; refresh on Settings rail selection.
+- tests/unit/test_autostart.py (6 tests), tests/ui/test_settings.py (5 tests), tests/ui/test_screenshots.py, tests/ui/test_contrast.py (token contrast both themes).
+- Verification: ruff ✓ | pytest 140 passed ✓ | lint-imports 7 kept/0 broken ✓.
+- Not automatable here: actual reboot autostart — covered by human_todo.md #3 (clean-profile install) and #6 (screenshot eyeball).
+
 ## Next: Phase 3 (plan §21) — calendar/events repo + view already built; Google Calendar sync is HUMAN-GATED.

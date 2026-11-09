@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from PySide6.QtCore import QObject, Signal, Slot
 
 from secretary.agent.loop import run_turn
+from secretary.autostart import is_enabled as _autostart_is_enabled
+from secretary.autostart import set_enabled as _autostart_set_enabled
 from secretary.config import load_config, save_config
 from secretary.llm.probe import _probe_once
 from secretary.secrets import get_secret, set_secret
@@ -110,6 +112,17 @@ class Controller(QObject):
         cfg.app.timezone = timezone
         cfg.app.start_minimized = start_minimized
         save_config(cfg)
+
+    def get_autostart(self) -> bool:
+        """True if the Run-key autostart value is set (plan Appendix E)."""
+        try:
+            return _autostart_is_enabled()
+        except Exception:
+            return False
+
+    def set_autostart(self, enabled: bool) -> None:
+        """Add or remove the Run-key autostart value (plan Appendix E)."""
+        _autostart_set_enabled(enabled)
 
     def list_events(self, start_iso: str | None = None, end_iso: str | None = None) -> list[dict]:
         """Return calendar events in [start_iso, end_iso)."""
