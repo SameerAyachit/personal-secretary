@@ -48,6 +48,12 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
   - src/secretary/integrations/google/auth.py (NEW, b78f605): GoogleAuth refreshes access tokens from the OAuth2 token endpoint; refresh token stored in keyring "google_token"; 401/no-token → GoogleAuthError. 5 tests with respx-mocked endpoint + faked keyring.
   - src/secretary/integrations/google/calendar.py (NEW): CalendarClient over events.list + sync_calendar() windowed sync with nextSyncToken; upserts by google_event_id, soft-deletes removed events, persists token in the settings table. 3 tests with respx-mocked Calendar API.
 
+## Phase 3.5 (plan §21) — email, started 2026-11-09
+- Migration 005 (email_messages table) + store/repos/messages.py — DONE (a9757cf).
+- email_search / email_read (class A, quarantined reads; results wrapped as <untrusted> data in agent/loop.py per plan §8.6) — DONE (a9757cf), incl. prompt-injection test proving an injected email cannot cause a send.
+- email_draft (class B) — DONE (a9757cf); email_send class C prepare + pending_actions with 2-hour expiry — existed.
+- Next: email_triage (enum category/urgency/suggested_action output, no-tools LLM call), approvals recipient highlighting, send execute with payload re-verification, rest of injection test suite.
+
 ## Next: Phase 3.5 → 4 → 5 → 6 per plan §21 after Phase 3 code-buildable items.
 
 ## Test count (resolves 156 vs ~117)
