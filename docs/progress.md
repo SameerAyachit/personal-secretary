@@ -59,5 +59,9 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - research_brief (class A) — DONE (d3a3f49): plan queries → search (≤4 sources) → fetch/extract → quarantined per-source summaries → brief write → citation check removing unmatched claims; ≤8 LLM calls; partial/unavailable brief on search failure. 4 tests (tests/unit/tools/test_research.py).
 - Next: background research job with progress/caps (UI work, Phase 5).
 
+## Phase 5 (plan §21), started 2026-11-09
+- Settings theme toggle (system/light/dark; follows Windows color scheme) — DONE (7e2bf0d); also fixed save_config to handle nested tables.
+- Next: empty/error/offline states for all views, accessibility pass, diagnostics screen, remaining screenshots (human_todo.md #6).
+
 ## Test count (verified by running pytest, 2026-11-09)
 - python -m pytest --collect-only : 180 collected items; python -m pytest -q : 180 passed.
