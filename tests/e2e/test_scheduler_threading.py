@@ -1,30 +1,27 @@
-"""E2E: scheduler tick runs on its own thread against the store connection
+"""E2E: scheduler tick runs on a worker thread against the store connection
 created on the main thread (the real ``python -m secretary`` composition root).
 
-Bug: ``SchedulerThread`` called ``conn.execute()`` from its own thread while the
-connection was opened on the main thread. SQLite raised::
+Bug: the scheduler ticked on a worker thread and called ``conn.execute()`` on
+the connection opened on the main thread. SQLite raised::
 
     sqlite3.ProgrammingError: SQLite objects created in a thread can only be
     used in that same thread.
 
 So no reminder ever fired. Plan §5.4: one writer connection behind an RLock,
-accessed through ``Connection.write``/``read`` only, opened with
+accessed through ``Connection.write``/``read``/``execute`` only, opened with
 ``check_same_thread=False`` so threads may share it.
 """
 from __future__ import annotations
 
-import os
+import threading
 import time
 from pathlib import Path
 
 import secretary.scheduler.ticker as ticker_mod
-from secretary.scheduler.ticker import SchedulerThread
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import reminders as reminders_repo
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def _conn(tmp_path: Path) -> Connection:
@@ -35,12 +32,9 @@ def _conn(tmp_path: Path) -> Connection:
 
 
 def test_scheduler_fires_reminder_from_worker_thread(tmp_path, monkeypatch):
-    """Real composition root: scheduler thread uses the main-thread connection."""
-    os.environ["SECRETARY_DATA_ROOT"] = str(tmp_path)
-
-    conn = _conn(tmp_path)
-
+    """Real composition root: a worker thread uses the main-thread connection."""
     # A reminder due right now.
+    conn = _conn(tmp_path)
     reminders_repo.create(
         conn,
         task_id=None,
@@ -59,19 +53,22 @@ def test_scheduler_fires_reminder_from_worker_thread(tmp_path, monkeypatch):
     monkeypatch.setattr(ticker_mod, "TICK_SECONDS", 0.05)
 
     fired: list[dict] = []
+    stop = False
 
-    def on_fired(entries):
-        fired.extend(entries)
+    def tick_loop():
+        while not stop:
+            ticker_mod.tick(conn, on_fired=fired.extend)
 
-    scheduler = SchedulerThread(conn, on_fired=on_fired)
+    thread = threading.Thread(target=tick_loop, daemon=True)
     try:
-        scheduler.start()
+        thread.start()
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and not fired:
             time.sleep(0.05)
     finally:
-        scheduler.stop()
+        stop = True
+        thread.join()
 
-    assert fired, "no reminder fired on the scheduler thread"
+    assert fired, "no reminder fired on the worker thread"
     rows = inbox_repo.list_unacknowledged(conn)
     assert any(r["title"] == "drink water" for r in rows), rows

@@ -43,6 +43,18 @@ from secretary.store.repos import tasks as tasks_repo
 logger = logging.getLogger(__name__)
 
 
+def get_active_llm_key() -> str | None:
+    """Return the API key for the configured LLM provider from Credential Manager.
+
+    Uses the same service and key name that ``diagnose`` checks: service
+    ``Secretary``, key ``llm_api_key:{provider}`` where ``provider`` is the
+    active provider from config.
+    """
+    cfg = load_config()
+    provider = cfg.llm.active
+    return get_secret(f"llm_api_key:{provider}")
+
+
 class Controller(QObject):
     """Signals out (to the UI) and slots in (from the UI)."""
 
@@ -279,7 +291,7 @@ class Controller(QObject):
         if not text or not text.strip():
             self.turn_finished.emit("")
             return
-        key = get_secret("secretary", f"llm_api_key:{self.llm.active if self.llm else 'groq'}")
+        key = get_active_llm_key()
         if not key:
             self.turn_status.emit("No LLM key configured.")
             self.turn_finished.emit(
@@ -292,10 +304,10 @@ class Controller(QObject):
                 run_turn(
                     text,
                     {"turn_id": f"turn-{self._turn_id}", "now": "", "tz": "Asia/Kolkata"},
-                    self._llm,
-                    self._limiter,
-                    self._router,
-                    self._registry,
+                    self.llm,
+                    self.limiter,
+                    self.router,
+                    self.registry,
                     self.conn,
                 )
             )

@@ -11,8 +11,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-import keyring
-
 from secretary.agent.router import Router
 from secretary.app import create_app
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
@@ -26,7 +24,8 @@ from secretary.tools import research as research_tools
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
 
-from .controller import Controller
+from .config import load_config
+from .controller import Controller, get_active_llm_key
 from .diagnose import run_diagnose
 from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
@@ -86,9 +85,12 @@ def main(argv: list[str] | None = None) -> int:
         # LLM provider, limiter.
         llm = None
         limiter = None
-        key = keyring.get_password("secretary", "llm_api_key:groq")
+        key = get_active_llm_key()
         if key:
-            llm = OpenAICompatClient(base_url="https://api.groq.com/openai/v1", api_key=key, model="llama-3.1-8b-instant")
+            cfg = load_config()
+            provider = cfg.llm.active
+            prov = cfg.llm.providers[provider]
+            llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
             limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
         controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
         conn.llm = llm  # research_brief uses it; None when no LLM key is configured
