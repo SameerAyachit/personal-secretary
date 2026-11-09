@@ -48,17 +48,44 @@ def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
     now = datetime.now(UTC)
     start = resolve_when(parsed.when_text, now, parsed.tz)
     end = start + timedelta(minutes=_duration_minutes(parsed.duration_text))
+    start_utc = start.astimezone(UTC)
+    end_utc = end.astimezone(UTC)
+    # Class B conflict warning: warn about overlapping EXISTING events before
+    # inserting (so the new event is not flagged against itself).
+    conflicts = _overlapping_events(conn, start_utc, end_utc)
     event_id = events_repo.create(
         conn,
         title=parsed.title,
-        start_at=start.astimezone(UTC).isoformat(),
-        end_at=end.astimezone(UTC).isoformat(),
+        start_at=start_utc.isoformat(),
+        end_at=end_utc.isoformat(),
         tz=parsed.tz,
         all_day=0,
         location=parsed.location,
         turn_id=turn_id,
     )
-    return {"event_id": event_id, "title": parsed.title, "start_at": start.isoformat()}
+    result = {"event_id": event_id, "title": parsed.title, "start_at": start.isoformat()}
+    if conflicts:
+        result["conflicts"] = conflicts
+    return result
+
+
+def _overlapping_events(conn: Connection, start_utc: datetime, end_utc: datetime) -> list[dict]:
+    """Return existing events that overlap [start_utc, end_utc) (class B conflict warning)."""
+    q_start = (start_utc - timedelta(days=1)).isoformat()
+    q_end = (end_utc + timedelta(days=1)).isoformat()
+    rows = events_repo.list_window(conn, start_at=q_start, end_at=q_end)
+    conflicts: list[dict] = []
+    for row in rows:
+        es = datetime.fromisoformat(row["start_at"])
+        if es.tzinfo is None:
+            es = es.replace(tzinfo=UTC)
+        ee_raw = row["end_at"]
+        ee = datetime.fromisoformat(ee_raw) if ee_raw else es + timedelta(hours=1)
+        if ee.tzinfo is None:
+            ee = ee.replace(tzinfo=UTC)
+        if es < end_utc and start_utc < ee:
+            conflicts.append({"title": row["title"], "start_at": row["start_at"], "end_at": row["end_at"]})
+    return conflicts
 
 
 class EventListArgs(BaseModel):

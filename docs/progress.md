@@ -27,21 +27,28 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - python -m secretary --diagnose : DIAGNOSE OK
 - python -m secretary (offscreen) : main window opens, no crash
 
+## CURRENT PRIORITY (A–E) — verified against code + fresh output, 2026-11-09 — ALL DONE
+- A. SearchCache transaction fix — DONE: provider.py uses `Connection.write()`; db.py `write()` does BEGIN IMMEDIATE/COMMIT/ROLLBACK; `python -m secretary` opens main window offscreen.
+- B. Smoke test tests/smoke/test_startup.py — DONE: builds real composition root, offscreen Qt + temp data root, passes in suite.
+- C. lint-imports config — DONE: `[tool.importlinter]` + contracts in pyproject.toml; 7 kept, 0 broken (exit 0).
+- D. `asyncio_default_fixture_loop_scope = "function"` — DONE: pyproject.toml [tool.pytest.ini_options].
+- E. Test count — DONE: 125 collected, 125 passed (exit 0). "156" was an unverified claim (progress.md P2-07 line), never confirmed by running pytest.
+
 ## Current session (2026-11-08) — Phase 3 code-buildable work
-- src/secretary/tools/events.py (NEW): event_create (class B, own event — resolves when_text in code via resolve_when, persists start/end UTC + tz through events_repo, writes action_log) and event_list (class A — lists events in today/tomorrow/week window).
-- src/secretary/__main__.py: register events tools in registry + route event_create/event_list keywords.
-- tests/unit/tools/test_events.py (NEW): create persists, past-time raises PastTime, list returns created events (3 tests).
-- Verification: ruff ✓ | pytest 121 passed ✓ | lint-imports 7 kept/0 broken ✓. Committed as 3b6a7e6.
+- src/secretary/tools/events.py (NEW): event_create (class B) and event_list (class A). Wired in __main__ registry + router.
+- src/secretary/timeparse/when.py: added resolve_date() (date-only variant of resolve_when, no past check).
+- src/secretary/tools/planning.py (NEW): plan_day (class A) — resolves date_text, lists the day's events, returns free slots within 09:00-17:00 local as structured data. Wired in __main__ registry + router.
+- tests/unit/tools/test_events.py (3 tests) + tests/unit/tools/test_planning.py (3 tests).
+- Verification: ruff ✓ | pytest 124 passed ✓ | lint-imports 7 kept/0 broken ✓. Committed as 324944b.
 
 ## Phase 3 remaining (plan §21)
-- plan_day tool (code finds free slots; LLM phrases) — code-buildable, next.
-- conflict warnings on reminders/events — code-buildable.
+- conflict warnings on reminders/events — code-buildable, next.
 - Google Calendar read sync (windowed, sync tokens) — HUMAN-GATED (needs credentials.json / Google Cloud project).
 
 ## Next: Phase 3.5 → 4 → 5 → 6 per plan §21 after Phase 3 code-buildable items.
 
 ## Test count (resolves 156 vs ~117)
-- python -m pytest --collect-only : 121 collected items; python -m pytest -q : 121 passed.
-- The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3). Actual verified count: 121.
+- python -m pytest --collect-only : 124 collected items; python -m pytest -q : 124 passed.
+- The "156 tests" in docs/progress.md (P2-07 line) was not verified by running pytest (protocol §3). Actual verified count: 124.
 
 ## Next: Phase 3 (plan §21) — calendar/events repo + view already built; Google Calendar sync is HUMAN-GATED.

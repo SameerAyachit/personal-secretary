@@ -78,8 +78,9 @@ B. CARD     write in docs/progress.md: task ID, files to create/edit, acceptance
 C. TEST     write tests; run them; confirm they fail for the right reason.
 D. BUILD    implement the minimum that satisfies the acceptance. Files < 300 lines; functions small; type hints; pydantic for external data; logging not print.
 E. VERIFY   run, in order:  ruff check .   |   python -m pytest -q   |   lint-imports
-            (mypy is lenient: run it, fix only real errors).
+            (mypy is lenient: run it, fix only real errors). `lint-imports` must print the contracts it checked; "Could not read any configuration" is a FAILURE, fix the config location. Report the exact test count from pytest output, never a number you did not just see.
 E2. UI TASKS ONLY (anything under src/secretary/ui/): first load `.opencode/skills/secretary-ui-design/SKILL.md` and follow it, including its screenshot review loop and "UI task done" definition.
+E3. APP SMOKE (every task that touches startup, wiring, store, scheduler, notifier, or UI; and always at every phase gate): `python -m pytest -q tests/smoke` must pass, where the smoke test builds the REAL composition root used by `python -m secretary` (offscreen Qt, temp data root), lets the event loop start, then closes the window. Also run `python -m secretary --diagnose`. Launch the real app once per phase and paste the first 15 lines of output. Unit tests passing never substitutes for this.
 F. FIX      on failure: fix and re-run. Max 3 fix cycles per failing item. If an edit tool fails twice on a file, rewrite the whole file.
 G. RECORD   append result lines to docs/progress.md; mark the task DONE / DONE-HUMAN-GATED / BLOCKED.
 H. COMMIT   git add -A && git commit -m "feat(scope): message" (conventional commits). Commit only when E is green.
@@ -139,8 +140,15 @@ Stop and write a short message (what is done, what stopped you, the one decision
 
 Everything else: decide, log, continue.
 
+Deferral rule: a task is NEVER deferred, skipped, or relabeled "later" because it is large, tedious, or in a later phase. Only the items listed in Section 4 may be DONE-HUMAN-GATED, and only after their code and fake-based tests exist. Never write "build complete" while any code-buildable task is NOT STARTED or PARTIAL; the final report must say "INCOMPLETE" in its first line in that case.
+
 ## 7. Context hygiene (hard limits for 200K-context models; sensible for 1M too)
 
+- RESUME AFTER AN INTERRUPTION (power cut, crash, closed window): before any new work run `git status --short` and `git log --oneline -5`, then read the last 60 lines of `docs/progress.md`. Git is the truth if it disagrees with progress.md.
+  - Clean tree: resume at the first task not marked DONE / DONE-HUMAN-GATED.
+  - Uncommitted changes: they belong to the interrupted task. Open each changed file (a file may be half-written or empty; rewrite any that is), run `ruff check .`, `python -m pytest -q`, `lint-imports`. If green and the task's acceptance is met, record it and commit. If not, finish the task from step D of the task loop. Never run `git reset --hard`, `git clean`, or delete files to "start clean"; if a file is truly corrupt, rewrite that one file.
+  - If a migration file was added but not committed, check it is complete before the DB is opened; never edit a committed migration.
+  - Fix any stray `.venv`/pip state with `python -m pip check`; reinstall only the missing package.
 - Never load the whole plan, never `cat` large files, never print full test logs: use `-q`, `| tail -n 20` (PowerShell: `| Select-Object -Last 20`).
 - At the start of every session and after any context reset/compaction: read, in this order, `AGENTS.md`, `EXECUTION_PROTOCOL.md` (root) §0-§3, `docs/progress.md` (last 60 lines). Then resume at the first task not marked DONE / DONE-HUMAN-GATED.
 - After every task, `docs/progress.md` must be enough to resume: current phase, last task, next task, open blockers.

@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import time_machine
 
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
@@ -83,3 +84,23 @@ def test_event_list_returns_created_events():
         assert titles == {"standup", "review"}
     finally:
         conn.close()
+
+
+def test_event_create_warns_on_overlapping_event():
+    # Freeze now to 2026-11-09 04:00 UTC (09:30 Kolkata) so both "today" events
+    # are future and overlap (10:00-11:00 vs 10:30-11:30 Kolkata).
+    frozen = datetime(2026, 11, 9, 4, 0, 0, tzinfo=UTC)
+    with time_machine.travel(frozen):
+        conn = _conn()
+        try:
+            event_create(
+                conn, "turn-1", {"title": "first event", "when_text": "today 10:00", "tz": "Asia/Kolkata"}
+            )
+            result = event_create(
+                conn, "turn-2", {"title": "second event", "when_text": "today 10:30", "tz": "Asia/Kolkata"}
+            )
+            assert "event_id" in result
+            assert "conflicts" in result
+            assert any(c["title"] == "first event" for c in result["conflicts"])
+        finally:
+            conn.close()
