@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+import urllib.request
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -131,3 +135,93 @@ def test_is_invalid_grant():
     assert is_invalid_grant(GoogleOAuthError("token exchange failed: invalid_grant"))
     assert is_invalid_grant(ValueError("invalid_grant"))
     assert not is_invalid_grant(GoogleOAuthError("network down"))
+
+
+def test_full_flow_real_loopback_stores_refresh_token(respx_mock, monkeypatch, tmp_path):
+    """Reproduce the real sign-in flow: mocked token endpoint + real loopback hit.
+
+    Simulates the browser being redirected back to the ephemeral loopback port
+    with an authorization code, then verifies the refresh token is stored under
+    the exact name diagnose checks (``google_token``).
+    """
+    creds = _write_credentials(tmp_path)
+    _mock_token_route(
+        respx_mock,
+        payload={"refresh_token": "rt-real-123", "access_token": "at-1", "expires_in": 3600},
+    )
+
+    store: dict[str, str] = {}
+    monkeypatch.setattr(oauth_module, "set_secret", store.__setitem__)
+    monkeypatch.setattr(oauth_module, "delete_secret", lambda key: store.pop(key, None))
+    monkeypatch.setattr(oauth_module, "get_secret", store.get)
+
+    flow = GoogleOAuthFlow.from_credentials_file(creds)
+
+    # Simulate the browser: open() is called with the Google auth URL; the
+    # loopback port is carried in the ``redirect_uri`` query parameter. Once the
+    # loopback server is serving, hit it with the redirect containing the code.
+    def fake_open(url):
+        params = parse_qs(urlparse(url).query)
+        redirect_uri = params.get("redirect_uri", [""])[0]
+        port = urlparse(redirect_uri).port
+
+        def hit() -> None:
+            time.sleep(0.3)
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/?code=auth-code&state=xyz", timeout=5
+            )
+
+        threading.Thread(target=hit, daemon=True).start()
+
+    monkeypatch.setattr(oauth_module.webbrowser, "open", fake_open)
+
+    rt = flow.run()
+    assert rt == "rt-real-123"
+    # Token stored under the exact name diagnose checks.
+    assert store.get("google_token") == "rt-real-123"
+    assert store.get("google_client_id") == "cid"
+    assert connected()
+
+
+def test_unexpected_flow_exception_swallowed_before_fix(respx_mock, monkeypatch, tmp_path):
+    """Regression: an unexpected exception in the background thread must not be
+    swallowed — it must surface as a clear Settings error instead of silently
+    leaving Google showing "not connected".
+    """
+    creds = _write_credentials(tmp_path)
+    _mock_token_route(
+        respx_mock,
+        payload={"refresh_token": "rt-abc", "access_token": "at-1", "expires_in": 3600},
+    )
+
+    store: dict[str, str] = {}
+    monkeypatch.setattr(oauth_module, "set_secret", store.__setitem__)
+    monkeypatch.setattr(oauth_module, "delete_secret", lambda key: store.pop(key, None))
+
+    flow = GoogleOAuthFlow.from_credentials_file(creds)
+
+    # Simulate the browser redirect so _run_server() completes, then make the
+    # token exchange raise an unexpected exception.
+    def fake_open(url):
+        params = parse_qs(urlparse(url).query)
+        port = urlparse(unquote(params.get("redirect_uri", [""])[0])).port
+
+        def hit():
+            time.sleep(0.3)
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/?code=auth-code&state=xyz", timeout=5)
+
+        threading.Thread(target=hit, daemon=True).start()
+
+    monkeypatch.setattr(oauth_module.webbrowser, "open", fake_open)
+
+    # Make run() raise an unexpected (non-GoogleOAuthError) exception, as a real
+    # network/keyring failure would. Before the fix this escaped the daemon
+    # thread and was lost; after the fix _connect_google_background catches it.
+    monkeypatch.setattr(flow, "exchange_code", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    try:
+        flow.run()
+    except RuntimeError:
+        pass  # the unexpected exception escapes run() and must be caught by the caller
+    else:
+        raise AssertionError("expected RuntimeError to escape run()")

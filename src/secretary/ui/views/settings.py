@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import io
 
+from PySide6.QtCore import Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -99,6 +100,7 @@ class SettingsView(QWidget):
         card_layout.addWidget(self._sync_status)
 
         self._controller.google_connected.connect(self.refresh_google)
+        self._controller.error.connect(self._on_controller_error)
         self.refresh_google()
 
         card_layout.addStretch()
@@ -131,6 +133,11 @@ class SettingsView(QWidget):
             self._controller.connect_google()
         except Exception as exc:  # surface to the diagnostics-style error
             self._google_status.setText(f"Google: connect failed ({exc})")
+
+    @Slot(str, str)
+    def _on_controller_error(self, action: str, message: str) -> None:
+        if action == "google_connect":
+            self._google_status.setText(f"Google: connect failed ({message})")
 
     def _run_diagnostics(self) -> None:
         buf = io.StringIO()

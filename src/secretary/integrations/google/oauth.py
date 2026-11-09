@@ -14,7 +14,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import secrets as _secrets
+import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -35,6 +38,8 @@ SCOPES = (
 )
 REFRESH_TOKEN_KEY = "google_token"
 CLIENT_ID_KEY = "google_client_id"
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleOAuthError(Exception):
@@ -67,7 +72,6 @@ class _RedirectHandler(BaseHTTPRequestHandler):
             _RedirectHandler.error = params.get("error", ["unknown"])[0]
             self.send_response(400)
             self.end_headers()
-        self.server.shutdown()  # type: ignore[attr-defined]
 
     def log_message(self, fmt: str, *args) -> None:  # silence
         return
@@ -161,25 +165,42 @@ class GoogleOAuthFlow:
     def _run_server(self, port: int) -> str:
         _RedirectHandler.code = None
         _RedirectHandler.error = None
-        with HTTPServer(("127.0.0.1", port), _RedirectHandler) as server:
-            server.serve_forever()
-        if _RedirectHandler.error:
-            raise GoogleOAuthError(f"OAuth flow failed: {_RedirectHandler.error}")
-        if not _RedirectHandler.code:
-            raise GoogleOAuthError("OAuth flow returned no authorization code")
-        return _RedirectHandler.code
+        server = HTTPServer(("127.0.0.1", port), _RedirectHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        try:
+            # Wait for the redirect handler to capture the code (or an error).
+            # serve_forever() runs on server_thread, so shutdown() below is
+            # called from a different thread and cannot deadlock.
+            deadline = time.time() + 120
+            while _RedirectHandler.code is None and _RedirectHandler.error is None:
+                if time.time() > deadline:
+                    raise GoogleOAuthError("OAuth flow timed out waiting for redirect")
+                time.sleep(0.05)
+            if _RedirectHandler.error:
+                raise GoogleOAuthError(f"OAuth flow failed: {_RedirectHandler.error}")
+            if not _RedirectHandler.code:
+                raise GoogleOAuthError("OAuth flow returned no authorization code")
+            return _RedirectHandler.code
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join()
 
     # ---------------------------------------------------------------- run
 
     def run(self) -> str:
         """Run the full consent flow; return the refresh token."""
+        logger.info("google oauth flow starting")
         port = self._pick_port()
         redirect_uri = f"http://127.0.0.1:{port}/"
         state = _secrets.token_urlsafe(16)
         code_verifier, code_challenge = self._make_pkce_pair()
         url = self.authorization_url(state, code_challenge, redirect_uri)
+        logger.info("google consent url opened in browser")
         webbrowser.open(url)
         code = self._run_server(port)
+        logger.info("google authorization code received")
         tokens = self.exchange_code(code, code_verifier, redirect_uri)
         refresh_token = tokens.get("refresh_token")
         if not refresh_token:
@@ -188,6 +209,7 @@ class GoogleOAuthFlow:
             )
         set_secret(REFRESH_TOKEN_KEY, refresh_token)
         set_secret(CLIENT_ID_KEY, self.client_id)
+        logger.info("google refresh token stored in Credential Manager")
         return refresh_token
 
 

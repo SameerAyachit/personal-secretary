@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import threading
 from datetime import UTC, datetime
 
@@ -38,6 +39,8 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
+
+logger = logging.getLogger(__name__)
 
 
 class Controller(QObject):
@@ -190,22 +193,42 @@ class Controller(QObject):
         threading.Thread(target=self._connect_google_background, daemon=True).start()
 
     def _connect_google_background(self) -> None:
+        """Run the OAuth consent flow on a background thread.
+
+        Every step is logged (without secrets) and any failure is surfaced
+        through the ``error`` signal so the Settings view can show a clear
+        message instead of silently leaving Google "not connected".
+        """
+        logger.info("google connect flow started")
         try:
-            flow = GoogleOAuthFlow.from_credentials_file(credentials_path())
+            creds_path = credentials_path()
+            logger.info("google credentials file: %s", creds_path)
+            flow = GoogleOAuthFlow.from_credentials_file(creds_path)
+            logger.info("google consent flow starting (browser + loopback)")
             flow.run()
+            logger.info("google refresh token stored in Credential Manager")
         except FileNotFoundError:
-            self.error.emit(
-                "google_connect",
+            msg = (
                 "credentials.json not found in the data root. "
-                "Download it from the Google Cloud console and place it next to config.toml.",
+                "Download it from the Google Cloud console and place it next to config.toml."
             )
+            logger.warning("google connect: %s", msg)
+            self.error.emit("google_connect", msg)
             return
         except GoogleOAuthError as exc:
             if is_invalid_grant(exc):
                 disconnect()
-            self.error.emit("google_connect", str(exc))
+            msg = str(exc)
+            logger.warning("google connect failed: %s", msg)
+            self.error.emit("google_connect", msg)
+            return
+        except Exception as exc:  # unexpected failure: never swallow in the daemon thread
+            msg = f"google connect failed: {exc}"
+            logger.exception("google connect failed unexpectedly")
+            self.error.emit("google_connect", msg)
             return
         self.google_connected.emit()
+        logger.info("google connect flow completed")
 
     @Slot()
     def disconnect_google(self) -> None:
