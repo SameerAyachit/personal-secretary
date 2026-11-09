@@ -156,36 +156,47 @@ def sync_calendar(
     page_token = None
     synced = deleted = 0
     retried = False
-    while True:
-        try:
-            data = client.list_events(
-                calendar_id,
-                None if sync_token else time_min,
-                None if sync_token else time_max,
-                page_token=page_token,
-                sync_token=sync_token if page_token is None else None,
-            )
-        except GoogleCalendarSyncTokenInvalid:
-            if retried:
-                raise
-            # Stale sync token: discard it and do a full time-window resync.
-            retried = True
-            sync_token = None
-            page_token = None
-            continue
-        for item in data.get("items", []) or []:
-            if item.get("status") == "deleted":
-                _soft_delete(conn, item["id"], turn_id)
-                deleted += 1
-            else:
-                result = _upsert_event(conn, item, turn_id)
-                if result is not None:
-                    synced += 1
-        page_token = data.get("nextPageToken")
-        next_sync_token = data.get("nextSyncToken")
-        if next_sync_token:
-            sync_token = next_sync_token
-        if not page_token:
-            break
-    settings_repo.set(conn, SYNC_TOKEN_KEY, sync_token or "", turn_id=turn_id)
+    try:
+        while True:
+            try:
+                data = client.list_events(
+                    calendar_id,
+                    None if sync_token else time_min,
+                    None if sync_token else time_max,
+                    page_token=page_token,
+                    sync_token=sync_token if page_token is None else None,
+                )
+            except GoogleCalendarSyncTokenInvalid:
+                if retried:
+                    raise
+                # Stale sync token: discard it and do a full time-window resync.
+                retried = True
+                sync_token = None
+                page_token = None
+                continue
+            for item in data.get("items", []) or []:
+                if item.get("status") == "deleted":
+                    _soft_delete(conn, item["id"], turn_id)
+                    deleted += 1
+                else:
+                    result = _upsert_event(conn, item, turn_id)
+                    if result is not None:
+                        synced += 1
+            page_token = data.get("nextPageToken")
+            next_sync_token = data.get("nextSyncToken")
+            if next_sync_token:
+                sync_token = next_sync_token
+            if not page_token:
+                break
+        settings_repo.set(conn, SYNC_TOKEN_KEY, sync_token or "", turn_id=turn_id)
+        # Sync succeeded: clear any previous failure flag.
+        settings_repo.set(conn, "google_sync_failed", "0", turn_id=turn_id)
+        settings_repo.set(conn, "google_sync_error", "", turn_id=turn_id)
+    except GoogleCalendarSyncTokenInvalid:
+        raise
+    except Exception as exc:
+        # Record the failure so the UI can show a "sync failed" chip.
+        settings_repo.set(conn, "google_sync_failed", "1", turn_id=turn_id)
+        settings_repo.set(conn, "google_sync_error", str(exc), turn_id=turn_id)
+        raise
     return {"synced": synced, "deleted": deleted}

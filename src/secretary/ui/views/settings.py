@@ -94,6 +94,10 @@ class SettingsView(QWidget):
         self._google_button.clicked.connect(self._on_connect_google)
         card_layout.addWidget(self._google_button)
 
+        self._sync_status = QLabel()
+        self._sync_status.setObjectName("Caption")
+        card_layout.addWidget(self._sync_status)
+
         self._controller.google_connected.connect(self.refresh_google)
         self.refresh_google()
 
@@ -116,6 +120,11 @@ class SettingsView(QWidget):
         self._google_button.setAccessibleName(
             "Reconnect Google" if connected else "Connect Google"
         )
+        sync = self._controller.get_google_sync_status()
+        if sync.get("failed"):
+            self._sync_status.setText(f"Google sync: failed ({sync.get('error', '')})")
+        else:
+            self._sync_status.setText("Google sync: OK")
 
     def _on_connect_google(self) -> None:
         try:

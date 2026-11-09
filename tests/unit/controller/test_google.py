@@ -10,6 +10,7 @@ from secretary.integrations.google.oauth import (
 )
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
+from secretary.store.repos import settings as settings_repo
 
 
 def _conn(tmp_path):
@@ -125,3 +126,16 @@ def test_disconnect_google(monkeypatch, tmp_path):
     controller.disconnect_google()
     assert REFRESH_TOKEN_KEY not in store
     assert CLIENT_ID_KEY not in store
+
+
+def test_get_google_sync_status_ok(tmp_path):
+    controller = Controller(_conn(tmp_path))
+    assert controller.get_google_sync_status() == {"failed": False, "error": ""}
+
+
+def test_get_google_sync_status_failed(tmp_path):
+    conn = _conn(tmp_path)
+    settings_repo.set(conn, "google_sync_failed", "1", turn_id="s")
+    settings_repo.set(conn, "google_sync_error", "network down", turn_id="s")
+    controller = Controller(conn)
+    assert controller.get_google_sync_status() == {"failed": True, "error": "network down"}

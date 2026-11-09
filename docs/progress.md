@@ -44,7 +44,10 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 ## Phase 3 status (plan §21), 2026-11-09
 - plan_day — DONE (free slots 09:00-17:00 local, committed 324944b).
 - event_create + event_list — DONE incl. class-B conflict warnings (25302e5) and all-day events (de39d2a).
-- Google Calendar read sync (windowed, sync tokens) — HUMAN-GATED (needs credentials.json / Google Cloud project); code can be written/tested against mocked HTTP.
+- Google Calendar read sync (windowed, sync tokens) — code-buildable & tested against mocked HTTP; only real sign-in/credentials.json is HUMAN-GATED.
+  - calendar.py: 410 → full resync, etag skip-if-unchanged, sync failure recorded to settings (c51b907, 783b5ee).
+  - gmail.py (NEW): Gmail messages.list / messages.get read client (783b5ee).
+  - auth.py (NEW): OAuth consent flow loopback+PKCE; Settings Connect/Reconnect button + status; controller get_google_connected / get_google_sync_status; settings UI chip (5213b27).
   - src/secretary/integrations/google/auth.py (NEW, b78f605): GoogleAuth refreshes access tokens from the OAuth2 token endpoint; refresh token stored in keyring "google_token"; 401/no-token → GoogleAuthError. 5 tests with respx-mocked endpoint + faked keyring.
   - src/secretary/integrations/google/calendar.py (NEW): CalendarClient over events.list + sync_calendar() windowed sync with nextSyncToken; upserts by google_event_id, soft-deletes removed events, persists token in the settings table. 3 tests with respx-mocked Calendar API.
 

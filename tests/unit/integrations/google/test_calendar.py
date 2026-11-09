@@ -11,6 +11,7 @@ import secretary.integrations.google.auth as auth_module
 from secretary.integrations.google.auth import GoogleAuth, GoogleAuthError
 from secretary.integrations.google.calendar import (
     CalendarClient,
+    GoogleCalendarError,
     GoogleCalendarSyncTokenInvalid,
     sync_calendar,
 )
@@ -293,5 +294,34 @@ def test_sync_skips_unchanged_etag(respx_mock, monkeypatch):
 
         rows = events_repo.list_window(conn, start_at="2026-01-01T00:00:00+00:00", end_at="2027-01-01T00:00:00+00:00")
         assert [r["title"] for r in rows] == ["Unchanged event"]
+    finally:
+        conn.close()
+
+
+def test_sync_failure_recorded(respx_mock, monkeypatch):
+    """A sync failure is recorded in settings so the UI can show a chip."""
+    conn = _conn()
+    try:
+        settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
+        monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
+        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
+        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
+        respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
+            return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
+        )
+        respx_mock.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        ).mock(return_value=httpx.Response(500, json={"error": {"message": "boom"}}))
+
+        auth = GoogleAuth("cid", "secret")
+        try:
+            sync_calendar(conn, CalendarClient(auth), "primary")
+        except GoogleCalendarError:
+            pass
+        else:  # pragma: no cover - defensive
+            raise AssertionError("expected GoogleCalendarError")
+
+        assert settings_repo.get(conn, "google_sync_failed") == "1"
+        assert "500" in settings_repo.get(conn, "google_sync_error")
     finally:
         conn.close()

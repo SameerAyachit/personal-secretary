@@ -36,6 +36,7 @@ from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
+from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
 
 
@@ -171,6 +172,15 @@ class Controller(QObject):
             return connected()
         except Exception:
             return False
+
+    def get_google_sync_status(self) -> dict:
+        """Return the last Google Calendar sync status for the UI chip."""
+        try:
+            failed = settings_repo.get(self.conn, "google_sync_failed") == "1"
+            error = settings_repo.get(self.conn, "google_sync_error") or ""
+            return {"failed": bool(failed), "error": str(error)}
+        except Exception:
+            return {"failed": False, "error": ""}
 
     @Slot()
     def connect_google(self) -> None:
