@@ -80,14 +80,48 @@ class SettingsView(QWidget):
         self._autostart.toggled.connect(self._on_autostart_toggled)
         card_layout.addWidget(self._autostart)
 
-        self._diagnose = QPushButton("Run diagnostics")
-        self._diagnose.setAccessibleName("Run diagnostics")
-        self._diagnose.clicked.connect(self._run_diagnostics)
-        card_layout.addWidget(self._diagnose)
+        # ---- Google -------------------------------------------------------
+        section = QLabel("Google Calendar & Gmail")
+        section.setObjectName("Section")
+        card_layout.addWidget(section)
+
+        self._google_status = QLabel()
+        self._google_status.setObjectName("Caption")
+        card_layout.addWidget(self._google_status)
+
+        self._google_button = QPushButton("Connect Google")
+        self._google_button.setAccessibleName("Connect Google")
+        self._google_button.clicked.connect(self._on_connect_google)
+        card_layout.addWidget(self._google_button)
+
+        self._controller.google_connected.connect(self.refresh_google)
+        self.refresh_google()
 
         card_layout.addStretch()
         layout.addWidget(card)
         layout.addStretch()
+
+    def refresh_google(self) -> None:
+        """Re-read the refresh-token state and update the button/status."""
+        try:
+            connected = self._controller.get_google_connected()
+        except Exception:
+            connected = False
+        self._google_status.setText(
+            "Google: connected"
+            if connected
+            else "Google: not connected (click Connect Google)"
+        )
+        self._google_button.setText("Reconnect Google" if connected else "Connect Google")
+        self._google_button.setAccessibleName(
+            "Reconnect Google" if connected else "Connect Google"
+        )
+
+    def _on_connect_google(self) -> None:
+        try:
+            self._controller.connect_google()
+        except Exception as exc:  # surface to the diagnostics-style error
+            self._google_status.setText(f"Google: connect failed ({exc})")
 
     def _run_diagnostics(self) -> None:
         buf = io.StringIO()

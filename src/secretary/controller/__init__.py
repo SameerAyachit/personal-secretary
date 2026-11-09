@@ -9,7 +9,9 @@ Controller, which is allowed to import ``store`` per the layering contract.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import threading
 from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -18,7 +20,15 @@ from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
 from secretary.autostart import set_enabled as _autostart_set_enabled
 from secretary.config import load_config, save_config
+from secretary.integrations.google.oauth import (
+    GoogleOAuthError,
+    GoogleOAuthFlow,
+    connected,
+    disconnect,
+    is_invalid_grant,
+)
 from secretary.llm.probe import _probe_once
+from secretary.paths import credentials_path
 from secretary.secrets import get_secret, set_secret
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
@@ -39,6 +49,7 @@ class Controller(QObject):
     inbox_changed = Signal()
     tasks_changed = Signal()
     approvals_changed = Signal()
+    google_connected = Signal()
     job_progress = Signal(str, int, str)
     error = Signal(str, str)
 
@@ -153,6 +164,45 @@ class Controller(QObject):
     def set_autostart(self, enabled: bool) -> None:
         """Add or remove the Run-key autostart value (plan Appendix E)."""
         _autostart_set_enabled(enabled)
+
+    def get_google_connected(self) -> bool:
+        """True if a Google refresh token is stored in Credential Manager."""
+        try:
+            return connected()
+        except Exception:
+            return False
+
+    @Slot()
+    def connect_google(self) -> None:
+        """Run the OAuth consent flow (credentials.json) on a background thread
+        so the UI is not blocked while the user authenticates in the browser.
+        """
+        threading.Thread(target=self._connect_google_background, daemon=True).start()
+
+    def _connect_google_background(self) -> None:
+        try:
+            flow = GoogleOAuthFlow.from_credentials_file(credentials_path())
+            flow.run()
+        except FileNotFoundError:
+            self.error.emit(
+                "google_connect",
+                "credentials.json not found in the data root. "
+                "Download it from the Google Cloud console and place it next to config.toml.",
+            )
+            return
+        except GoogleOAuthError as exc:
+            if is_invalid_grant(exc):
+                disconnect()
+            self.error.emit("google_connect", str(exc))
+            return
+        self.google_connected.emit()
+
+    @Slot()
+    def disconnect_google(self) -> None:
+        """Remove the Google refresh token (Reconnect Google path)."""
+        with contextlib.suppress(Exception):
+            disconnect()
+        self.google_connected.emit()
 
     def list_events(self, start_iso: str | None = None, end_iso: str | None = None) -> list[dict]:
         """Return calendar events in [start_iso, end_iso)."""
