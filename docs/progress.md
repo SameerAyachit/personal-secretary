@@ -52,7 +52,8 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - Migration 005 (email_messages table) + store/repos/messages.py — DONE (a9757cf).
 - email_search / email_read (class A, quarantined reads; results wrapped as <untrusted> data in agent/loop.py per plan §8.6) — DONE (a9757cf), incl. prompt-injection test proving an injected email cannot cause a send.
 - email_draft (class B) — DONE (a9757cf); email_send class C prepare + pending_actions with 2-hour expiry — existed.
-- Next: email_triage (enum category/urgency/suggested_action output, no-tools LLM call), approvals recipient highlighting, send execute with payload re-verification, rest of injection test suite.
+- email_triage (class A, enum category/urgency/suggested_action via injected no-tools classifier, upsert to triage_results) — DONE (beba178), 5 tests.
+- Next: send execute with payload re-verification + expiry (pending_actions), approvals recipient highlighting (UI), rest of injection suite.
 
 ## Next: Phase 3.5 → 4 → 5 → 6 per plan §21 after Phase 3 code-buildable items.
 
