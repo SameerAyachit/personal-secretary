@@ -21,7 +21,8 @@ logger = logging.getLogger("secretary")
 
 try:  # desktop-notifier is optional
     from desktop_notifier import Notifier as DesktopNotifier
-except Exception:
+except Exception as exc:  # not installed, or cannot initialise (AUMID unpackaged)
+    logger.warning("desktop-notifier import failed: %s", exc)
     DesktopNotifier = None
 
 
@@ -35,10 +36,12 @@ class Notifier(QObject):
         super().__init__()
         self._tray = tray_icon
         self._desktop = None
-        try:
-            self._desktop = DesktopNotifier()
-        except Exception:  # desktop-notifier may be unavailable at runtime
-            logger.warning("desktop-notifier unavailable")
+        if DesktopNotifier is not None:
+            try:
+                self._desktop = DesktopNotifier()
+            except Exception as exc:  # AUMID missing when run unpackaged, etc.
+                logger.warning("desktop-notifier unavailable: %s", exc)
+                self._desktop = None
 
     def set_tray(self, tray_icon) -> None:
         self._tray = tray_icon
