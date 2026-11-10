@@ -14,6 +14,7 @@ next start — nothing is lost (plan §10.2).
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -23,6 +24,8 @@ from PySide6.QtCore import QThread
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
+
+logger = logging.getLogger(__name__)
 
 TICK_SECONDS = 30
 REPEAT_ALERT_MINUTES = 10
@@ -126,21 +129,24 @@ def _sweeper(conn: sqlite3.Connection) -> None:
 
 def tick(conn: Connection, on_fired=None) -> None:
     """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper."""
+    logger.info("scheduler tick: started")
     try:
         due = conn.write(_fire_due)
-    except Exception as exc:
+    except Exception:
         due = []
-        print(f"scheduler fire failed: {exc}")
+        logger.exception("scheduler fire failed")
     if due and on_fired is not None:
+        logger.info("scheduler tick: fired %d reminder(s)", len(due))
         try:
             on_fired(due)
-        except Exception as exc:
-            print(f"scheduler notify failed: {exc}")
+        except Exception:
+            logger.exception("scheduler notify failed")
     for step in (_repeat_alerts, _snooze_expiry, _sweeper):
         try:
             conn.write(step)
-        except Exception as exc:
-            print(f"scheduler step {step.__name__} failed: {exc}")
+        except Exception:
+            logger.exception("scheduler step %s failed", step.__name__)
+    logger.info("scheduler tick: finished")
 
 
 class SchedulerThread(QThread):
@@ -155,7 +161,13 @@ class SchedulerThread(QThread):
     def run(self) -> None:  # type: ignore[override]
         while self._running:
             tick(self._conn, self._on_fired)
-            self.msleep(TICK_SECONDS * 1000)
+            # Sleep in small increments so stop() is responsive and shutdown is
+            # deterministic (no 30 s wait stuck in msleep).
+            slept = 0
+            while slept < TICK_SECONDS * 1000 and self._running:
+                self.msleep(100)
+                slept += 100
 
     def stop(self) -> None:
         self._running = False
+        self.wait()
