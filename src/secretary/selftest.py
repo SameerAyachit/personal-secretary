@@ -31,7 +31,7 @@ from secretary.integrations.google.oauth import connected
 from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.notify.notifier import Notifier
-from secretary.paths import credentials_path, db_path
+from secretary.paths import config_path, credentials_path, db_path
 from secretary.scheduler.ticker import SchedulerThread
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
@@ -109,6 +109,7 @@ def _build_controller(conn: Connection) -> tuple[Controller, dict]:
     info = {
         "provider": provider,
         "model": prov.primary_model,
+        "config_path": str(config_path()),
         "service": "Secretary",
         "key_name": f"llm_api_key:{provider}",
         "key_length": len(key),
@@ -120,7 +121,7 @@ def _build_controller(conn: Connection) -> tuple[Controller, dict]:
 
 def _chat_meta(info: dict) -> str:
     return (
-        f"(provider={info['provider']}, model={info['model']}, "
+        f"(config={info['config_path']}, provider={info['provider']}, model={info['model']}, "
         f"service={info['service']}, name={info['key_name']}, "
         f"length={info['key_length']}, prefix={info['key_prefix']})"
     )
@@ -159,8 +160,13 @@ def _selftest_reminder(data_root: Path) -> str:
     except RuntimeError as exc:
         return f"[FAIL] reminder: {exc}"
     notifier = Notifier(None)
-    notified = []
-    notifier.notified.connect(notified.append)
+    notified: list[tuple[str, str]] = []
+
+    def _record_notify(title: str, body: str, priority: bool = False) -> bool:
+        notified.append((title, body))
+        return True
+
+    notifier.notify = _record_notify  # type: ignore[method-assign]
 
     def on_fired(entries):
         for entry in entries:
@@ -266,6 +272,14 @@ def run_selftest(name: str) -> int:
     _app = QApplication.instance() or QApplication([])
     data_root = Path(tempfile.mkdtemp(prefix="secretary-selftest-"))
     os.environ["SECRETARY_DATA_ROOT"] = str(data_root)
+
+    # Copy the real config.toml (if any) into the temp data root so the real
+    # composition root reads the user's configured provider/model instead of
+    # falling back to empty defaults.
+    real_cfg = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Secretary" / "config.toml"
+    if real_cfg.exists():
+        (data_root / "config.toml").write_bytes(real_cfg.read_bytes())
+
     tests = {
         "chat": _selftest_chat,
         "reminder": _selftest_reminder,

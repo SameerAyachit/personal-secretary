@@ -110,6 +110,25 @@ def run_diagnose() -> int:
         else:
             warns.append(f"{label} [WARN] missing")
 
+    # LLM model configured for the active provider (never print the key value)
+    try:
+        from .config import load_config  # noqa: PLC0415  (optional module)
+        from .paths import config_path  # noqa: PLC0415
+
+        _cfg = load_config()
+        _provider = _cfg.llm.active
+        _model = _cfg.llm.providers[_provider].primary_model or ""
+        oks.append(
+            f"LLM config: {config_path()} provider={_provider} model={_model or '(none)'} [OK]"
+        )
+        if not _model or _model.lower().startswith(("fake", "test")):
+            warns.append(
+                f"LLM model [WARN] placeholder or empty for provider {_provider}; "
+                "open Settings > AI and pick one"
+            )
+    except Exception as exc:
+        warns.append(f"LLM model [WARN] could not be read: {exc}")
+
     if fails:
         print("DIAGNOSE FAILED")
         for p in fails:

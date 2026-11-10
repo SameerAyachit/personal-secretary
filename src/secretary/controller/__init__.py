@@ -32,6 +32,7 @@ from secretary.integrations.google.oauth import (
     disconnect,
     is_invalid_grant,
 )
+from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.llm.probe import _probe_once
 from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
 from secretary.secrets import delete_secret, get_secret, set_secret
@@ -192,6 +193,34 @@ class Controller(QObject):
             return {"status": "placeholder", "provider": provider, "key_name": key_name}
         return {"status": "saved", "provider": provider, "key_name": key_name}
 
+    def get_available_models(self, provider: str | None = None) -> list[str]:
+        """Return the models listed by the active provider's GET /models endpoint.
+
+        Never prints or returns secrets. Returns an empty list if the provider
+        has no key or the endpoint fails (the dropdown falls back to the
+        configured primary_model).
+        """
+        cfg = load_config()
+        provider = provider or cfg.llm.active
+        prov = cfg.llm.providers.get(provider)
+        if prov is None:
+            return []
+        key = get_secret(f"llm_api_key:{provider}")
+        if not key:
+            return []
+        client = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model or "x")
+
+        async def _list_and_close() -> list[str]:
+            try:
+                return await client.list_models()
+            finally:
+                await client.aclose()
+
+        try:
+            return asyncio.run(_list_and_close())
+        except Exception:  # endpoint unavailable -> empty dropdown, caller falls back
+            return []
+
     def set_theme(self, theme: str) -> None:
         """Persist the UI theme (system|light|dark)."""
         cfg = load_config()
@@ -331,6 +360,13 @@ class Controller(QObject):
             self.turn_finished.emit(
                 "I don't have an LLM key configured yet. Set one in Settings to chat, "
                 "or use the quick-add field to create a task."
+            )
+            return
+        if self.llm is None:
+            # Key present but model missing/placeholder: do not call the provider.
+            self.turn_status.emit("No model selected.")
+            self.turn_finished.emit(
+                "No model selected. Open Settings > AI and pick one."
             )
             return
         self.turn_status.emit("Thinking...")

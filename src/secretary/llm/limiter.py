@@ -74,4 +74,9 @@ class Limiter:
         """Correct the bucket after a call from actual usage and headers."""
         self.tok_tokens += est_tokens - used_tokens
         if header_remaining is not None:
-            self.tok_tokens = min(self.tok_tokens, header_remaining * 0.9)
+            try:
+                remaining = int(header_remaining)
+            except (TypeError, ValueError):
+                remaining = None
+            if remaining is not None:
+                self.tok_tokens = min(self.tok_tokens, remaining * 0.9)

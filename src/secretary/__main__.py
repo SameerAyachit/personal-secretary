@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import logging
 import signal
 import sys
 from ctypes import wintypes
@@ -39,11 +40,13 @@ from .errors import install_excepthooks, install_reporter
 from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
-from .paths import db_path
+from .paths import config_path, db_path
 from .scheduler.ticker import SchedulerThread
 from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
 from .ui.main_window import MainWindow
+
+logger = logging.getLogger(__name__)
 
 # Windows console control event: Ctrl+C. 0 is the value of CTRL_C_EVENT.
 CTRL_C_EVENT = 0
@@ -142,12 +145,28 @@ def main(argv: list[str] | None = None) -> int:
         llm = None
         limiter = None
         key = get_active_llm_key()
+        cfg = load_config()
+        provider = cfg.llm.active
+        prov = cfg.llm.providers[provider]
+        model = prov.primary_model or ""
+        logger.info(
+            "llm config: path=%s provider=%s model=%r key_name=%s",
+            config_path(),
+            provider,
+            model,
+            prov.key_name,
+        )
         if key:
-            cfg = load_config()
-            provider = cfg.llm.active
-            prov = cfg.llm.providers[provider]
-            llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
-            limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
+            if not model or model.lower().startswith(("fake", "test")):
+                logger.warning(
+                    "LLM model not configured for provider %s in %s; "
+                    "open Settings > AI and pick a model",
+                    provider,
+                    config_path(),
+                )
+            else:
+                llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=model)
+                limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
         controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
         install_reporter(controller.error.emit)
         conn.llm = llm  # research_brief uses it; None when no LLM key is configured
