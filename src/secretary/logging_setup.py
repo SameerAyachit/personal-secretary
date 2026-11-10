@@ -19,17 +19,18 @@ _SECRET_KEYS = frozenset({
 })
 
 
-def _redact(value) -> str:
-    text = str(value)
-    return _REDACTED if len(text) > 2 else text
-
-
 def _redact_obj(obj):
+    """Redact secret values; leave plain strings readable.
+
+    Only dict values whose keys look secret-like are masked. Plain strings
+    (e.g. log messages, positional args) are left intact so the rest of the
+    message stays readable.
+    """
     if isinstance(obj, dict):
         return {k: (_REDACTED if _is_secret(k) else _redact_obj(v)) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_redact_obj(v) for v in obj]
-    return _redact(obj)
+    return obj
 
 
 def _is_secret(key: str) -> bool:
@@ -42,8 +43,8 @@ class RedactionFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         if record.args:
-            record.args = tuple(_redact_obj(a) if isinstance(a, (dict, list, tuple)) else _redact(a) for a in record.args)
-        record.msg = _redact_obj(record.msg) if isinstance(record.msg, (dict, list)) else _redact(record.msg)
+            record.args = tuple(_redact_obj(a) if isinstance(a, (dict, list, tuple)) else a for a in record.args)
+        record.msg = _redact_obj(record.msg) if isinstance(record.msg, (dict, list)) else record.msg
         return True
 
 
