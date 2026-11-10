@@ -119,12 +119,13 @@ class SettingsView(QWidget):
         grid.addWidget(QLabel("Provider"), 0, 0)
         grid.addWidget(self._ai_provider, 0, 1)
 
-        prov = llm["providers"][provider]
-        self._ai_model = QLineEdit(prov["model"])
+        self._ai_model = QComboBox()
         self._ai_model.setAccessibleName("Model")
+        self._ai_model.setEditable(True)
         self._ai_model.setPlaceholderText("model")
         grid.addWidget(QLabel("Model"), 1, 0)
         grid.addWidget(self._ai_model, 1, 1)
+        self._refresh_ai_models()
 
         self._ai_key = QLineEdit()
         self._ai_key.setAccessibleName("API key")
@@ -156,9 +157,30 @@ class SettingsView(QWidget):
         return card
 
     def _on_ai_provider_changed(self, text: str) -> None:
-        prov = self._controller.get_llm_config()["providers"][text]
-        self._ai_model.setText(prov["model"])
+        self._refresh_ai_models()
         self._refresh_ai_key_status()
+
+    def _refresh_ai_models(self) -> None:
+        """Populate the model dropdown from the provider's GET /models endpoint.
+
+        Falls back to the configured primary_model if the endpoint is
+        unavailable. The combo stays editable so any model can be typed.
+        """
+        provider = self._ai_provider.currentText()
+        models = self._controller.get_available_models(provider)
+        current = self._ai_model.currentText()
+        self._ai_model.blockSignals(True)
+        self._ai_model.clear()
+        if models:
+            self._ai_model.addItems(models)
+        # Ensure the configured/current model is present and selected.
+        cfg = self._controller.get_llm_config()
+        configured = cfg["providers"][provider]["model"] or ""
+        target = current or configured or ""
+        if target and target not in [self._ai_model.itemText(i) for i in range(self._ai_model.count())]:
+            self._ai_model.addItem(target)
+        self._ai_model.setCurrentText(target if target else self._ai_model.itemText(0))
+        self._ai_model.blockSignals(False)
 
     def _refresh_ai_key_status(self) -> None:
         """Show key status (saved / missing / placeholder), never the value."""
@@ -176,7 +198,7 @@ class SettingsView(QWidget):
         prov = self._controller.get_llm_config()["providers"][provider]
         try:
             result = self._controller.test_llm_connection(
-                prov["base_url"], self._ai_key.text(), self._ai_model.text()
+                prov["base_url"], self._ai_key.text(), self._ai_model.currentText()
             )
         except Exception as exc:  # surface exact error, never secrets
             self._ai_status.setText(f"Test failed: {exc}")
@@ -195,7 +217,7 @@ class SettingsView(QWidget):
                 self._ai_provider.currentText(),
                 self._ai_key.text(),
                 prov["base_url"],
-                self._ai_model.text(),
+                self._ai_model.currentText(),
             )
             self._ai_status.setText("Provider saved")
             self._ai_status.setHidden(False)
