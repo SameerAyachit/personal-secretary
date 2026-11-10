@@ -12,10 +12,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import shutil
 import threading
+import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtWidgets import QApplication
 
 from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
@@ -29,10 +33,12 @@ from secretary.integrations.google.oauth import (
     is_invalid_grant,
 )
 from secretary.llm.probe import _probe_once
-from secretary.paths import credentials_path
-from secretary.secrets import get_secret, set_secret
+from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
+from secretary.secrets import delete_secret, get_secret, set_secret
+from secretary.store.backup import backup, list_backups, prune_backups, restore
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
+from secretary.store.repos import facts as facts_repo
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
@@ -425,4 +431,84 @@ class Controller(QObject):
         else:
             pa_repo.decide(self.conn, pending_id, "executed", turn_id="manual")
             self.turn_status.emit("Email sent.")
-        self.approvals_changed.emit()
+
+    # ---- Data: backups, restore, delete-all, export (plan §5.5, §941-942) ----
+
+    def list_backups(self) -> list[dict]:
+        """Return available backups, newest first (Settings Data page)."""
+        out: list[dict] = []
+        for p in list_backups(backups_dir()):
+            st = p.stat()
+            out.append({"name": p.name, "path": str(p), "size": st.st_size, "mtime": st.st_mtime})
+        return out
+
+    def backup_now(self) -> dict | None:
+        """Force a backup now (Settings Data 'Backup now')."""
+        backups_dir().mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        dst = backups_dir() / f"secretary-{stamp}.db"
+        backup(self.conn, dst)
+        prune_backups(backups_dir(), 7)
+        return {"name": dst.name, "path": str(dst)}
+
+    def restore_backup(self, backup_name: str) -> dict:
+        """Restore a backup: safety-copy the current DB, replace it, then quit
+        so the app restarts into the restored data (Settings Data 'Restore')."""
+        src = backups_dir() / backup_name
+        if not src.exists():
+            return {"error": "backup not found"}
+        safety = restore(src, db_path())
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        return {"safety": str(safety), "restored": backup_name}
+
+    def delete_all_data(self) -> dict:
+        """Wipe the DB, backups, logs and Credential Manager entries, then quit
+        (Settings Data 'Delete all data', plan §941)."""
+        self.conn.close()
+        db = db_path()
+        with contextlib.suppress(FileNotFoundError):
+            db.unlink()
+        for suffix in ("-wal", "-shm"):
+            with contextlib.suppress(FileNotFoundError):
+                Path(str(db) + suffix).unlink()
+        bd = backups_dir()
+        if bd.exists():
+            shutil.rmtree(bd)
+        ld = logs_dir()
+        if ld.exists():
+            shutil.rmtree(ld)
+        delete_secret("google_token")
+        delete_secret("google_client_id")
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        return {"deleted": True}
+
+    def export_data(self, fmt: str = "json") -> dict:
+        """Export tasks, reminders, events and facts as JSON or Markdown
+        (Settings Data 'Export', plan §942)."""
+        payload = {
+            "tasks": tasks_repo.list_open(self.conn),
+            "reminders": reminders_repo.list_all(self.conn),
+            "events": events_repo.list_window(self.conn, start_at="", end_at=""),
+            "facts": facts_repo.list_all(self.conn),
+            "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        backups_dir().mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        if fmt == "markdown":
+            lines = ["# Secretary export", f"Generated: {payload['exported_at']}", ""]
+            for section in ("tasks", "reminders", "events", "facts"):
+                lines.append(f"## {section.title()}")
+                for row in payload[section]:
+                    lines.append("- " + " | ".join(f"{k}={v}" for k, v in row.items() if v is not None))
+                lines.append("")
+            text = "\n".join(lines)
+            dst = backups_dir() / f"secretary-export-{stamp}.md"
+            dst.write_text(text, encoding="utf-8")
+        else:
+            dst = backups_dir() / f"secretary-export-{stamp}.json"
+            dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {"name": dst.name, "path": str(dst), "format": fmt}

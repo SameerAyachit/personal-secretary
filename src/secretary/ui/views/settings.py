@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import contextlib
 import io
+from pathlib import Path
 
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -104,9 +107,128 @@ class SettingsView(QWidget):
         self._controller.error.connect(self._on_controller_error)
         self.refresh_google()
 
+        # ---- Data -----------------------------------------------------------
+        section = QLabel("Data")
+        section.setObjectName("Section")
+        card_layout.addWidget(section)
+
+        self._last_backup = QLabel()
+        self._last_backup.setObjectName("Caption")
+        card_layout.addWidget(self._last_backup)
+        self.refresh_backups()
+
+        btn_backup = QPushButton("Backup now")
+        btn_backup.setAccessibleName("Backup now")
+        btn_backup.clicked.connect(self._on_backup_now)
+        card_layout.addWidget(btn_backup)
+
+        row = QHBoxLayout()
+        btn_restore = QPushButton("Restore from backup…")
+        btn_restore.setAccessibleName("Restore from backup")
+        btn_restore.clicked.connect(self._on_restore_backup)
+        row.addWidget(btn_restore)
+        btn_delete = QPushButton("Delete all data")
+        btn_delete.setAccessibleName("Delete all data")
+        btn_delete.setObjectName("Danger")
+        btn_delete.clicked.connect(self._on_delete_all_data)
+        row.addWidget(btn_delete)
+        card_layout.addLayout(row)
+
+        row = QHBoxLayout()
+        btn_export_json = QPushButton("Export JSON")
+        btn_export_json.setAccessibleName("Export JSON")
+        btn_export_json.clicked.connect(lambda: self._on_export("json"))
+        row.addWidget(btn_export_json)
+        btn_export_md = QPushButton("Export Markdown")
+        btn_export_md.setAccessibleName("Export Markdown")
+        btn_export_md.clicked.connect(lambda: self._on_export("markdown"))
+        row.addWidget(btn_export_md)
+        card_layout.addLayout(row)
+
         card_layout.addStretch()
         layout.addWidget(card)
         layout.addStretch()
+
+    def refresh_backups(self) -> None:
+        """Show the newest backup (Settings Data page)."""
+        try:
+            backups = self._controller.list_backups()
+        except Exception:
+            backups = []
+        if backups:
+            latest = backups[0]
+            self._last_backup.setText(
+                f"Last backup: {latest['name']} ({latest['size']} bytes)"
+            )
+        else:
+            self._last_backup.setText("No backups yet.")
+
+    @Slot()
+    def _on_backup_now(self) -> None:
+        try:
+            result = self._controller.backup_now()
+            if result:
+                self.refresh_backups()
+                self._last_backup.setText(
+                    f"Backed up: {result['name']} ({result.get('size', 0)} bytes)"
+                )
+        except Exception as exc:
+            QMessageBox.warning(self, "Backup failed", str(exc))
+
+    @Slot()
+    def _on_restore_backup(self) -> None:
+        backups = self._controller.list_backups()
+        if not backups:
+            QMessageBox.information(self, "Restore", "No backups available.")
+            return
+        name, ok = QFileDialog.getOpenFileName(
+            self,
+            "Restore from backup",
+            str(Path(backups[0]["path"]).parent),
+            "Secretary backup (*.db)",
+        )
+        if not ok or not name:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Restore backup",
+            f"Replace current data with '{Path(name).name}'?\n"
+            "A safety copy of the current DB is kept and the app restarts.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._controller.restore_backup(Path(name).name)
+        except Exception as exc:
+            QMessageBox.warning(self, "Restore failed", str(exc))
+
+    @Slot()
+    def _on_delete_all_data(self) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Delete all data",
+            "This permanently wipes the database, backups, logs and saved "
+            "credentials, then quits the app. This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._controller.delete_all_data()
+        except Exception as exc:
+            QMessageBox.warning(self, "Delete all data failed", str(exc))
+
+    @Slot()
+    def _on_export(self, fmt: str) -> None:
+        try:
+            result = self._controller.export_data(fmt)
+            QMessageBox.information(
+                self, "Export complete", f"Exported to {result['name']}"
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
 
     def refresh_google(self) -> None:
         """Re-read the refresh-token state and update the button/status."""
