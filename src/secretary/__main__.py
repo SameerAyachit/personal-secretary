@@ -21,6 +21,7 @@ from secretary.app import create_app
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
+from secretary.selftest import run_selftest
 from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
 from secretary.tools import memory as memory_tools
@@ -34,6 +35,7 @@ from secretary.ui.quick_capture import QuickCapture
 from .config import load_config
 from .controller import Controller, get_active_llm_key
 from .diagnose import run_diagnose
+from .errors import install_excepthooks, install_reporter
 from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
@@ -51,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="secretary", description="Secretary personal assistant")
     parser.add_argument("--minimized", action="store_true", help="start hidden to the tray")
     parser.add_argument("--diagnose", action="store_true", help="run diagnostics and exit")
+    parser.add_argument("--selftest", metavar="NAME", help="run a real-machine selftest (chat|reminder|google|all)")
     return parser
 
 
@@ -87,9 +90,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     setup_logging()
+    install_excepthooks()
 
     if args.diagnose:
         return run_diagnose()
+
+    if args.selftest:
+        return run_selftest(args.selftest)
 
     app = create_app(argv)
     if not app.is_primary():
@@ -99,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     _install_quit_on_ctrl_c(app)
 
     app.start_worker()
+    conn = None
+    scheduler = None
     try:
         conn = Connection(db_path())
         migrate(conn._con, migrations_folder(), lambda: None)
@@ -140,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
             limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
         controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+        install_reporter(controller.error.emit)
         conn.llm = llm  # research_brief uses it; None when no LLM key is configured
         window = MainWindow(controller)
 
@@ -174,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
             window.show()
         return app.run()
     finally:
+        if scheduler is not None:
+            scheduler.stop()
+        if conn is not None:
+            conn.close()
         app.cleanup()
 
 
