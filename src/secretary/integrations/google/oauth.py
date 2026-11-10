@@ -209,6 +209,10 @@ class GoogleOAuthFlow:
             )
         set_secret(REFRESH_TOKEN_KEY, refresh_token)
         set_secret(CLIENT_ID_KEY, self.client_id)
+        if not connected():
+            raise GoogleOAuthError(
+                "refresh token was not stored in Credential Manager"
+            )
         logger.info("google refresh token stored in Credential Manager")
         return refresh_token
 

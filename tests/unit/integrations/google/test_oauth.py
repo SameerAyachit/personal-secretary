@@ -88,6 +88,7 @@ def test_run_stores_refresh_token(respx_mock, monkeypatch, tmp_path):
 
     store: dict[str, str] = {}
     monkeypatch.setattr(oauth_module, "set_secret", store.__setitem__)
+    monkeypatch.setattr(oauth_module, "get_secret", store.get)
     monkeypatch.setattr(oauth_module, "delete_secret", store.pop)
 
     flow = GoogleOAuthFlow.from_credentials_file(creds)
