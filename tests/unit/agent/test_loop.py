@@ -1,5 +1,6 @@
 """Tests for agent/loop.py: scripted conversations and loop guards (plan §8.1)."""
 
+import json
 import sqlite3
 import tempfile
 import time
@@ -110,6 +111,44 @@ async def test_no_tool_call_returns_text():
         ctx = {"turn_id": "turn-3", "now": "2026-11-07 10:00", "tz": "Asia/Kolkata", "today_iso": "2026-11-07"}
         result = await run_turn("hello", ctx, llm, limiter, router, registry, conn)
         assert result == "Sure thing!"
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_call_message_has_type_and_function_wrapper():
+    """The assistant message that records a tool call must use the OpenAI-compatible
+    shape {"id","type":"function","function":{"name","arguments"}} so providers
+    (e.g. Groq) accept it. Regression test for the missing "type" 400.
+    """
+    conn = _conn()
+    try:
+        registry, router, limiter = _build_dependencies(conn)
+        llm = _fake_llm(
+            [
+                LLMResponse(
+                    text="",
+                    tool_calls=[ToolCall(call_id="c1", name="task_create", args={"title": "buy milk"})],
+                    usage={},
+                    headers={},
+                    model="fake",
+                ),
+                LLMResponse(text="Created the task.", tool_calls=[], usage={}, headers={}, model="fake"),
+            ]
+        )
+        ctx = {"turn_id": "turn-wrap", "now": "2026-11-07 10:00", "tz": "Asia/Kolkata", "today_iso": "2026-11-07"}
+        await run_turn("add a task buy milk", ctx, llm, limiter, router, registry, conn)
+        # Inspect the last assistant message sent to the LLM.
+        sent = llm.calls[-1]["messages"]
+        assistant_tool_msgs = [m for m in sent if m.get("role") == "assistant" and m.get("tool_calls")]
+        assert assistant_tool_msgs, "no assistant tool-call message was sent"
+        for m in assistant_tool_msgs:
+            for tc in m["tool_calls"]:
+                assert tc.get("type") == "function", tc
+                assert set(tc.keys()) == {"id", "type", "function"}, tc
+                assert set(tc["function"].keys()) == {"name", "arguments"}, tc
+                assert tc["function"]["name"] == "task_create"
+                assert json.loads(tc["function"]["arguments"]) == {"title": "buy milk"}
     finally:
         conn.close()
 

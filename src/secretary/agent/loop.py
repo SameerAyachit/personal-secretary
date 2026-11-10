@@ -187,9 +187,16 @@ async def run_turn(
             messages.append(
                 {
                     "role": "assistant",
-                    "content": "",
+                    "content": None,
                     "tool_calls": [
-                        {"id": call.call_id, "name": call.name, "arguments": json.dumps(call.args)}
+                        {
+                            "id": call.call_id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": json.dumps(call.args),
+                            },
+                        }
                     ],
                 }
             )

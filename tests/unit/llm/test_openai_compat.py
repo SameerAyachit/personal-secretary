@@ -1,5 +1,7 @@
 """Tests for OpenAICompatClient using mocked HTTP (respx)."""
 
+import json
+
 import pytest
 import respx
 from httpx import Response
@@ -117,3 +119,52 @@ async def test_list_models():
         finally:
             await client.aclose()
     assert models == ["m1", "m2"]
+
+
+@pytest.mark.asyncio
+async def test_missing_type_in_assistant_tool_call_returns_400():
+    """A provider enforcing the OpenAI tool_call shape rejects messages whose
+    assistant tool_call entries lack "type" (the Groq 400 we saw in production).
+    """
+    with respx.mock:
+
+        def check(request):
+            body = json.loads(request.content)
+            for m in body.get("messages", []):
+                if m.get("role") == "assistant":
+                    for tc in m.get("tool_calls", []) or []:
+                        if tc.get("type") != "function":
+                            return Response(
+                                400,
+                                json={
+                                    "error": {
+                                        "message": "messages.2.tool_calls.0.type: property 'type' is missing",
+                                        "type": "invalid_request_error",
+                                    }
+                                },
+                            )
+            return Response(200, json=_chat_response(text="ok"))
+
+        respx.post(f"{BASE}/chat/completions").mock(side_effect=check)
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            with pytest.raises(ProviderUnavailable) as exc:
+                await client.chat(
+                    messages=[
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {"id": "c1", "name": "task_create", "arguments": '{"title": "x"}'}
+                            ],
+                        }
+                    ],
+                    tools=[{"name": "task_create"}],
+                    tool_choice="auto",
+                    max_tokens=100,
+                    temperature=0.1,
+                    purpose="tool",
+                )
+            assert "type" in str(exc.value) and "missing" in str(exc.value)
+        finally:
+            await client.aclose()
