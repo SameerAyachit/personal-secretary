@@ -1,15 +1,18 @@
 """Settings view (plan §12.2).
 
-General page: theme and startup read from the controller. The "Start at login"
-checkbox is the Settings autostart toggle (plan §10.6, Appendix E): it adds or
-removes the ``Secretary`` value under the HKCU Run key; the checkbox always
-shows the true state read from that key.
+Four tabs only:
+  * General: theme and start-at-login autostart.
+  * AI: LLM provider, model, API key field, Test connection.
+  * Google: Connect/Reconnect, status, last sync, one error line.
+  * Data: backup now, restore from backup, export JSON/Markdown, delete all data.
+
+Everything else (for example memory facts) lives in the Diagnostics view, not
+here. Secret values are never echoed back to the screen.
 """
 
 from __future__ import annotations
 
 import contextlib
-import io
 from pathlib import Path
 
 from PySide6.QtCore import Slot
@@ -18,23 +21,23 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFrame,
-    QHBoxLayout,
+    QGridLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from secretary.controller import Controller
-from secretary.diagnose import run_diagnose
 from secretary.ui.theme import apply_theme, resolve_theme, tokens
 
 
 class SettingsView(QWidget):
-    """Settings view: General page with theme and start-at-login autostart."""
+    """Settings view: four tabs (General, AI, Google, Data)."""
 
     def __init__(self, controller: Controller) -> None:
         super().__init__()
@@ -52,18 +55,24 @@ class SettingsView(QWidget):
         title.setObjectName("Section")
         layout.addWidget(title)
 
-        card = QFrame()
-        card.setObjectName("Card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(
-            self._tokens.card_padding_wide, self._tokens.card_padding_wide,
-            self._tokens.card_padding_wide, self._tokens.card_padding_wide,
-        )
-        card_layout.setSpacing(self._tokens.space_sm)
+        tabs = QTabWidget()
+        tabs.addTab(self._general_tab(), "General")
+        tabs.addTab(self._ai_tab(), "AI")
+        tabs.addTab(self._google_tab(), "Google")
+        tabs.addTab(self._data_tab(), "Data")
+        layout.addWidget(tabs)
 
-        section = QLabel("General")
-        section.setObjectName("Section")
-        card_layout.addWidget(section)
+        self._controller.error.connect(self._on_controller_error)
+        self.refresh_google()
+
+    # ------------------------------------------------------------------ General
+
+    def _general_tab(self) -> QWidget:
+        card = QGroupBox("General")
+        card.setObjectName("Card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 16, 16, 16)
+        grid.setSpacing(12)
 
         self._theme = QComboBox()
         self._theme.setAccessibleName("Theme")
@@ -74,7 +83,8 @@ class SettingsView(QWidget):
             )
         )
         self._theme.currentTextChanged.connect(self._on_theme_changed)
-        card_layout.addWidget(self._theme)
+        grid.addWidget(QLabel("Theme"), 0, 0)
+        grid.addWidget(self._theme, 0, 1)
 
         self._autostart = QCheckBox("Start Secretary at login")
         self._autostart.setAccessibleName("Start at login")
@@ -84,108 +94,214 @@ class SettingsView(QWidget):
         )
         self._autostart.setChecked(self._controller.get_autostart())
         self._autostart.toggled.connect(self._on_autostart_toggled)
-        card_layout.addWidget(self._autostart)
+        grid.addWidget(self._autostart, 1, 0, 1, 2)
+        return card
 
-        # ---- Google -------------------------------------------------------
-        section = QLabel("Google Calendar & Gmail")
-        section.setObjectName("Section")
-        card_layout.addWidget(section)
+    # ------------------------------------------------------------------ AI
+
+    def _ai_tab(self) -> QWidget:
+        card = QGroupBox("AI")
+        card.setObjectName("Card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 16, 16, 16)
+        grid.setSpacing(10)
+
+        llm = self._controller.get_llm_config()
+        provider = llm["active"]
+        providers = list(llm["providers"].keys())
+
+        self._ai_provider = QComboBox()
+        self._ai_provider.setAccessibleName("LLM provider")
+        self._ai_provider.addItems(providers)
+        if provider in providers:
+            self._ai_provider.setCurrentText(provider)
+        self._ai_provider.currentTextChanged.connect(self._on_ai_provider_changed)
+        grid.addWidget(QLabel("Provider"), 0, 0)
+        grid.addWidget(self._ai_provider, 0, 1)
+
+        prov = llm["providers"][provider]
+        self._ai_model = QLineEdit(prov["model"])
+        self._ai_model.setAccessibleName("Model")
+        self._ai_model.setPlaceholderText("model")
+        grid.addWidget(QLabel("Model"), 1, 0)
+        grid.addWidget(self._ai_model, 1, 1)
+
+        self._ai_key = QLineEdit()
+        self._ai_key.setAccessibleName("API key")
+        self._ai_key.setPlaceholderText("API key (hidden)")
+        self._ai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        grid.addWidget(QLabel("API key"), 2, 0)
+        grid.addWidget(self._ai_key, 2, 1)
+
+        btn_test = QPushButton("Test connection")
+        btn_test.setAccessibleName("Test LLM connection")
+        btn_test.clicked.connect(self._on_ai_test)
+        grid.addWidget(btn_test, 3, 0)
+
+        self._ai_status = QLabel()
+        self._ai_status.setObjectName("Caption")
+        self._ai_status.setHidden(True)
+        grid.addWidget(self._ai_status, 3, 1)
+
+        btn_save = QPushButton("Save provider")
+        btn_save.setAccessibleName("Save LLM provider")
+        btn_save.clicked.connect(self._on_ai_save)
+        grid.addWidget(btn_save, 4, 0)
+
+        return card
+
+    def _on_ai_provider_changed(self, text: str) -> None:
+        prov = self._controller.get_llm_config()["providers"][text]
+        self._ai_model.setText(prov["model"])
+
+    def _on_ai_test(self) -> None:
+        provider = self._ai_provider.currentText()
+        prov = self._controller.get_llm_config()["providers"][provider]
+        try:
+            result = self._controller.test_llm_connection(
+                prov["base_url"], self._ai_key.text(), self._ai_model.text()
+            )
+        except Exception as exc:  # surface exact error, never secrets
+            self._ai_status.setText(f"Test failed: {exc}")
+            self._ai_status.setHidden(False)
+            return
+        if "error" in result:
+            self._ai_status.setText(f"Test failed: {result['error']}")
+        else:
+            self._ai_status.setText("Test connection OK")
+        self._ai_status.setHidden(False)
+
+    def _on_ai_save(self) -> None:
+        try:
+            prov = self._controller.get_llm_config()["providers"][self._ai_provider.currentText()]
+            self._controller.set_llm_provider(
+                self._ai_provider.currentText(),
+                self._ai_key.text(),
+                prov["base_url"],
+                self._ai_model.text(),
+            )
+            self._ai_status.setText("Provider saved")
+            self._ai_status.setHidden(False)
+        except Exception as exc:  # surface exact error, never secrets
+            self._ai_status.setText(f"Save failed: {exc}")
+            self._ai_status.setHidden(False)
+
+    # ------------------------------------------------------------------ Google
+
+    def _google_tab(self) -> QWidget:
+        card = QGroupBox("Google Calendar & Gmail")
+        card.setObjectName("Card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 16, 16, 16)
+        grid.setSpacing(10)
 
         self._google_status = QLabel()
         self._google_status.setObjectName("Caption")
-        card_layout.addWidget(self._google_status)
+        grid.addWidget(self._google_status, 0, 0, 1, 2)
+
+        self._sync_status = QLabel()
+        self._sync_status.setObjectName("Caption")
+        grid.addWidget(self._sync_status, 1, 0, 1, 2)
 
         self._google_button = QPushButton("Connect Google")
         self._google_button.setAccessibleName("Connect Google")
         self._google_button.clicked.connect(self._on_connect_google)
-        card_layout.addWidget(self._google_button)
+        grid.addWidget(self._google_button, 2, 0)
 
-        self._sync_status = QLabel()
-        self._sync_status.setObjectName("Caption")
-        card_layout.addWidget(self._sync_status)
+        self._google_disconnect = QPushButton("Reconnect Google")
+        self._google_disconnect.setAccessibleName("Reconnect Google")
+        self._google_disconnect.clicked.connect(self._on_disconnect_google)
+        grid.addWidget(self._google_disconnect, 2, 1)
+
+        self._google_error = QLabel()
+        self._google_error.setObjectName("Caption")
+        self._google_error.setHidden(True)
+        grid.addWidget(self._google_error, 3, 0, 1, 2)
 
         self._controller.google_connected.connect(self.refresh_google)
         self._controller.error.connect(self._on_controller_error)
-        self.refresh_google()
+        return card
 
-        # ---- Data -----------------------------------------------------------
-        section = QLabel("Data")
-        section.setObjectName("Section")
-        card_layout.addWidget(section)
+    def refresh_google(self) -> None:
+        """Re-read the refresh-token state and update the button/status."""
+        try:
+            connected = self._controller.get_google_connected()
+        except Exception:
+            connected = False
+        self._google_status.setText(
+            "Google: connected"
+            if connected
+            else "Google: not connected (click Connect Google)"
+        )
+        self._google_button.setEnabled(not connected)
+        self._google_button.setText("Reconnect Google" if connected else "Connect Google")
+        self._google_button.setAccessibleName(
+            "Reconnect Google" if connected else "Connect Google"
+        )
+        self._google_disconnect.setEnabled(connected)
+        sync = self._controller.get_google_sync_status()
+        if sync.get("failed"):
+            self._sync_status.setText(f"Google sync: failed ({sync.get('error', '')})")
+        else:
+            self._sync_status.setText("Google sync: OK")
+
+    @Slot()
+    def _on_connect_google(self) -> None:
+        try:
+            self._controller.connect_google()
+        except Exception as exc:  # surface to the Google tab
+            self._google_error.setText(f"Connect failed: {exc}")
+            self._google_error.setHidden(False)
+
+    @Slot()
+    def _on_disconnect_google(self) -> None:
+        try:
+            self._controller.disconnect_google()
+        except Exception as exc:  # surface to the Google tab
+            self._google_error.setText(f"Disconnect failed: {exc}")
+            self._google_error.setHidden(False)
+
+    # ------------------------------------------------------------------ Data
+
+    def _data_tab(self) -> QWidget:
+        card = QGroupBox("Data")
+        card.setObjectName("Card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 16, 16, 16)
+        grid.setSpacing(10)
 
         self._last_backup = QLabel()
         self._last_backup.setObjectName("Caption")
-        card_layout.addWidget(self._last_backup)
+        grid.addWidget(self._last_backup, 0, 0, 1, 2)
         self.refresh_backups()
 
         btn_backup = QPushButton("Backup now")
         btn_backup.setAccessibleName("Backup now")
         btn_backup.clicked.connect(self._on_backup_now)
-        card_layout.addWidget(btn_backup)
+        grid.addWidget(btn_backup, 1, 0)
 
-        row = QHBoxLayout()
         btn_restore = QPushButton("Restore from backup…")
         btn_restore.setAccessibleName("Restore from backup")
         btn_restore.clicked.connect(self._on_restore_backup)
-        row.addWidget(btn_restore)
+        grid.addWidget(btn_restore, 1, 1)
+
         btn_delete = QPushButton("Delete all data")
         btn_delete.setAccessibleName("Delete all data")
         btn_delete.setObjectName("Danger")
         btn_delete.clicked.connect(self._on_delete_all_data)
-        row.addWidget(btn_delete)
-        card_layout.addLayout(row)
+        grid.addWidget(btn_delete, 2, 0)
 
-        row = QHBoxLayout()
         btn_export_json = QPushButton("Export JSON")
         btn_export_json.setAccessibleName("Export JSON")
         btn_export_json.clicked.connect(lambda: self._on_export("json"))
-        row.addWidget(btn_export_json)
+        grid.addWidget(btn_export_json, 2, 1)
+
         btn_export_md = QPushButton("Export Markdown")
         btn_export_md.setAccessibleName("Export Markdown")
         btn_export_md.clicked.connect(lambda: self._on_export("markdown"))
-        row.addWidget(btn_export_md)
-        card_layout.addLayout(row)
+        grid.addWidget(btn_export_md, 3, 0)
 
-        # ---- Memory ---------------------------------------------------------
-        section = QLabel("Memory")
-        section.setObjectName("Section")
-        card_layout.addWidget(section)
-
-        self._memory_list = QVBoxLayout()
-        self._memory_list.setSpacing(2)
-        card_layout.addLayout(self._memory_list)
-
-        mem_row = QHBoxLayout()
-        self._mem_key = QLineEdit()
-        self._mem_key.setAccessibleName("Fact key")
-        self._mem_key.setPlaceholderText("key")
-        self._mem_value = QLineEdit()
-        self._mem_value.setAccessibleName("Fact value")
-        self._mem_value.setPlaceholderText("value")
-        btn_remember = QPushButton("Remember")
-        btn_remember.setAccessibleName("Remember fact")
-        btn_remember.clicked.connect(self._on_remember)
-        mem_row.addWidget(self._mem_key)
-        mem_row.addWidget(self._mem_value)
-        mem_row.addWidget(btn_remember)
-        card_layout.addLayout(mem_row)
-
-        mem_row2 = QHBoxLayout()
-        self._mem_forget_key = QLineEdit()
-        self._mem_forget_key.setAccessibleName("Forget fact key")
-        self._mem_forget_key.setPlaceholderText("forget key")
-        btn_forget = QPushButton("Forget")
-        btn_forget.setAccessibleName("Forget fact")
-        btn_forget.clicked.connect(self._on_forget)
-        mem_row2.addWidget(self._mem_forget_key)
-        mem_row2.addWidget(btn_forget)
-        card_layout.addLayout(mem_row2)
-
-        self.refresh_memory()
-
-        card_layout.addStretch()
-        layout.addWidget(card)
-        layout.addStretch()
+        return card
 
     def refresh_backups(self) -> None:
         """Show the newest backup (Settings Data page)."""
@@ -208,7 +324,7 @@ class SettingsView(QWidget):
             if result:
                 self.refresh_backups()
                 self._last_backup.setText(
-                    f"Backed up: {result['name']} ({result.get('size', 0)} bytes)"
+                    f"Backed up: {result['name']}"
                 )
         except Exception as exc:
             QMessageBox.warning(self, "Backup failed", str(exc))
@@ -268,96 +384,11 @@ class SettingsView(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
 
+    # ------------------------------------------------------------------ shared
+
     def refresh_memory(self) -> None:
-        """List remembered facts (Settings Memory page)."""
-        while self._memory_list.count():
-            item = self._memory_list.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        try:
-            facts = self._controller.list_memory_facts()
-        except Exception:
-            facts = []
-        for fact in facts:
-            row = QHBoxLayout()
-            label = QLabel(f"{fact['key']}: {fact['value']}")
-            label.setObjectName("Caption")
-            row.addWidget(label)
-            row.addStretch()
-            container = QWidget()
-            container.setLayout(row)
-            self._memory_list.addWidget(container)
-
-    @Slot()
-    def _on_remember(self) -> None:
-        key = self._mem_key.text().strip()
-        value = self._mem_value.text().strip()
-        if not key or not value:
-            return
-        try:
-            self._controller.remember_fact(key, value)
-            self._mem_key.clear()
-            self._mem_value.clear()
-            self.refresh_memory()
-        except Exception as exc:
-            QMessageBox.warning(self, "Remember failed", str(exc))
-
-    @Slot()
-    def _on_forget(self) -> None:
-        key = self._mem_forget_key.text().strip()
-        if not key:
-            return
-        try:
-            self._controller.forget_fact(key)
-            self._mem_forget_key.clear()
-            self.refresh_memory()
-        except Exception as exc:
-            QMessageBox.warning(self, "Forget failed", str(exc))
-
-    def refresh_google(self) -> None:
-        """Re-read the refresh-token state and update the button/status."""
-        try:
-            connected = self._controller.get_google_connected()
-        except Exception:
-            connected = False
-        self._google_status.setText(
-            "Google: connected"
-            if connected
-            else "Google: not connected (click Connect Google)"
-        )
-        self._google_button.setText("Reconnect Google" if connected else "Connect Google")
-        self._google_button.setAccessibleName(
-            "Reconnect Google" if connected else "Connect Google"
-        )
-        sync = self._controller.get_google_sync_status()
-        if sync.get("failed"):
-            self._sync_status.setText(f"Google sync: failed ({sync.get('error', '')})")
-        else:
-            self._sync_status.setText("Google sync: OK")
-
-    def _on_connect_google(self) -> None:
-        try:
-            self._controller.connect_google()
-        except Exception as exc:  # surface to the diagnostics-style error
-            self._google_status.setText(f"Google: connect failed ({exc})")
-
-    @Slot(str, str)
-    def _on_controller_error(self, action: str, message: str) -> None:
-        if action == "google_connect":
-            self._google_status.setText(f"Google: connect failed ({message})")
-
-    def _run_diagnostics(self) -> None:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = run_diagnose()
-        title = "Diagnostics — OK" if code == 0 else "Diagnostics — problems found"
-        QMessageBox.information(self, title, buf.getvalue() or "(no output)")
-
-    def refresh_autostart(self) -> None:
-        """Re-read the Run key so the checkbox shows the true state."""
-        with contextlib.suppress(Exception):
-            self._autostart.setChecked(self._controller.get_autostart())
+        """Kept for API compatibility; memory facts live in Diagnostics now."""
+        return
 
     def _on_theme_changed(self, text: str) -> None:
         mapping = {"System": "system", "Light": "light", "Dark": "dark"}
@@ -373,7 +404,6 @@ class SettingsView(QWidget):
             )
             self._theme.blockSignals(False)
             return
-        # Regenerate and re-apply the QSS so the change takes effect immediately.
         apply_theme(QApplication.instance(), resolve_theme(theme))
 
     def _on_autostart_toggled(self, checked: bool) -> None:
@@ -384,3 +414,16 @@ class SettingsView(QWidget):
             self._autostart.blockSignals(True)
             self._autostart.setChecked(not checked)
             self._autostart.blockSignals(False)
+
+    def refresh_autostart(self) -> None:
+        """Re-read the Run key so the checkbox shows the true state."""
+        with contextlib.suppress(Exception):
+            self._autostart.setChecked(self._controller.get_autostart())
+
+    @Slot(str, str)
+    def _on_controller_error(self, action: str, message: str) -> None:
+        if action == "google_connect":
+            self._google_error.setText(f"Connect failed: {message}")
+            self._google_error.setHidden(False)
+        else:
+            QMessageBox.warning(self, "Error", message)
