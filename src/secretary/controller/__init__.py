@@ -512,3 +512,16 @@ class Controller(QObject):
             dst = backups_dir() / f"secretary-export-{stamp}.json"
             dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return {"name": dst.name, "path": str(dst), "format": fmt}
+
+    def list_memory_facts(self) -> list[dict]:
+        """Return remembered facts (key/value) for the Settings Memory page."""
+        return facts_repo.list_all(self.conn)
+
+    def remember_fact(self, key: str, value: str) -> dict:
+        """Remember a fact (Settings Memory page)."""
+        facts_repo.upsert(self.conn, key, value)
+        return {"key": key, "value": value}
+
+    def forget_fact(self, key: str) -> bool:
+        """Forget a fact (Settings Memory page)."""
+        return facts_repo.delete(self.conn, key)

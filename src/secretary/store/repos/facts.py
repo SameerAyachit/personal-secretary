@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from ._base import now_utc, row_to_dict
+from ._base import action_log, now_utc, row_to_dict
 
 
 def upsert(con: sqlite3.Connection, key: str, value: str) -> None:
@@ -25,3 +25,11 @@ def get(con: sqlite3.Connection, key: str) -> str | None:
 def list_all(con: sqlite3.Connection) -> list[dict]:
     cur = con.execute("SELECT * FROM facts ORDER BY key")
     return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def delete(con: sqlite3.Connection, key: str) -> bool:
+    cur = con.execute("DELETE FROM facts WHERE key=?", (key,))
+    if cur.rowcount == 0:
+        return False
+    action_log(con, None, "deleted", "fact", None, {"key": key})
+    return True

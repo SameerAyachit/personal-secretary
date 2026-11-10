@@ -23,6 +23,7 @@ from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
+from secretary.tools import memory as memory_tools
 from secretary.tools import planning as planning_tools
 from secretary.tools import registry as tools_registry
 from secretary.tools import reminders as reminders_tools
@@ -110,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         events_tools.register(registry)
         planning_tools.register(registry)
         reminders_tools.register(registry)
+        memory_tools.register(registry)
         research_tools.register(registry)
         router = Router(registry)
         router.route("tasks_add", ["task", "create", "add", "remind"])
@@ -118,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
         router.route("reminder_list", ["remind", "reminder", "list", "show"])
         router.route("reminder_snooze", ["snooze", "reminder"])
         router.route("reminder_cancel", ["cancel", "reminder", "delete"])
+        router.route("memory_remember", ["remember", "memory"])
+        router.route("memory_forget", ["forget", "memory"])
         router.route("email_send", ["send", "email"])
         router.route("web_search", ["search", "web"])
         router.route("event_create", ["event", "calendar", "meeting", "appointment"])

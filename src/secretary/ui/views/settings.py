@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -145,6 +146,43 @@ class SettingsView(QWidget):
         row.addWidget(btn_export_md)
         card_layout.addLayout(row)
 
+        # ---- Memory ---------------------------------------------------------
+        section = QLabel("Memory")
+        section.setObjectName("Section")
+        card_layout.addWidget(section)
+
+        self._memory_list = QVBoxLayout()
+        self._memory_list.setSpacing(2)
+        card_layout.addLayout(self._memory_list)
+
+        mem_row = QHBoxLayout()
+        self._mem_key = QLineEdit()
+        self._mem_key.setAccessibleName("Fact key")
+        self._mem_key.setPlaceholderText("key")
+        self._mem_value = QLineEdit()
+        self._mem_value.setAccessibleName("Fact value")
+        self._mem_value.setPlaceholderText("value")
+        btn_remember = QPushButton("Remember")
+        btn_remember.setAccessibleName("Remember fact")
+        btn_remember.clicked.connect(self._on_remember)
+        mem_row.addWidget(self._mem_key)
+        mem_row.addWidget(self._mem_value)
+        mem_row.addWidget(btn_remember)
+        card_layout.addLayout(mem_row)
+
+        mem_row2 = QHBoxLayout()
+        self._mem_forget_key = QLineEdit()
+        self._mem_forget_key.setAccessibleName("Forget fact key")
+        self._mem_forget_key.setPlaceholderText("forget key")
+        btn_forget = QPushButton("Forget")
+        btn_forget.setAccessibleName("Forget fact")
+        btn_forget.clicked.connect(self._on_forget)
+        mem_row2.addWidget(self._mem_forget_key)
+        mem_row2.addWidget(btn_forget)
+        card_layout.addLayout(mem_row2)
+
+        self.refresh_memory()
+
         card_layout.addStretch()
         layout.addWidget(card)
         layout.addStretch()
@@ -229,6 +267,53 @@ class SettingsView(QWidget):
             )
         except Exception as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
+
+    def refresh_memory(self) -> None:
+        """List remembered facts (Settings Memory page)."""
+        while self._memory_list.count():
+            item = self._memory_list.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        try:
+            facts = self._controller.list_memory_facts()
+        except Exception:
+            facts = []
+        for fact in facts:
+            row = QHBoxLayout()
+            label = QLabel(f"{fact['key']}: {fact['value']}")
+            label.setObjectName("Caption")
+            row.addWidget(label)
+            row.addStretch()
+            container = QWidget()
+            container.setLayout(row)
+            self._memory_list.addWidget(container)
+
+    @Slot()
+    def _on_remember(self) -> None:
+        key = self._mem_key.text().strip()
+        value = self._mem_value.text().strip()
+        if not key or not value:
+            return
+        try:
+            self._controller.remember_fact(key, value)
+            self._mem_key.clear()
+            self._mem_value.clear()
+            self.refresh_memory()
+        except Exception as exc:
+            QMessageBox.warning(self, "Remember failed", str(exc))
+
+    @Slot()
+    def _on_forget(self) -> None:
+        key = self._mem_forget_key.text().strip()
+        if not key:
+            return
+        try:
+            self._controller.forget_fact(key)
+            self._mem_forget_key.clear()
+            self.refresh_memory()
+        except Exception as exc:
+            QMessageBox.warning(self, "Forget failed", str(exc))
 
     def refresh_google(self) -> None:
         """Re-read the refresh-token state and update the button/status."""
