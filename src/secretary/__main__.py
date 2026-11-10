@@ -9,7 +9,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ctypes
+import signal
 import sys
+from ctypes import wintypes
+
+from PySide6.QtCore import QMetaObject, Qt
 
 from secretary.agent.router import Router
 from secretary.app import create_app
@@ -44,6 +49,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _install_quit_on_ctrl_c(app) -> None:
+    """Quit the event loop on Ctrl+C so main()'s ``finally`` runs cleanup().
+
+    ``signal.signal(SIGINT)`` is not delivered while Qt's ``exec()`` is blocked
+    in the platform message loop (notably on Windows), so on Windows we handle
+    the console control event directly and post a quit to the GUI thread.
+    No secrets or credentials are touched here.
+    """
+    if sys.platform == "win32":
+        CTRL_C_EVENT = 0
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+        def _handler(ctrl_type: int) -> bool:
+            if ctrl_type == CTRL_C_EVENT:
+                QMetaObject.invokeMethod(app.app, "quit", Qt.ConnectionType.QueuedConnection)
+                return True
+            return False
+
+        # Keep the callback referenced so it is not garbage-collected.
+        _install_quit_on_ctrl_c._callback = _handler  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_handler, True)
+        return
+
+    def _handler(signum: int, frame) -> None:
+        app.app.quit()
+
+    signal.signal(signal.SIGINT, _handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -57,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     if not app.is_primary():
         print("Secretary is already running.", file=sys.stderr)
         return 0
+
+    _install_quit_on_ctrl_c(app)
 
     app.start_worker()
     try:
