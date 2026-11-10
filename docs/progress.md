@@ -55,6 +55,13 @@ Fresh command output (stabilization session, 2026-11-10):
 - Remaining (code-buildable): none open. Diagnostics screen was already DONE (a459468).
 - Test count now 254 collected (ruff ✓, lint-imports ✓, diagnose ✓).
 
+## Key-guard session (2026-11-10) — committed
+- CRITICAL: the test suite was writing to the real Windows Credential Manager and had overwritten the real Groq key (service Secretary, key llm_api_key:groq) with an 8-char test placeholder. I cannot recover the original key.
+- Item 1 (commit c316154): conftest.py session-wide autouse fixture installs an in-memory keyring backend (keyring.set_keyring) and points SECRETARY_DATA_ROOT / SECRETARY_CREDENTIALS to temp paths for EVERY test. Guard test tests/unit/test_keyring_guard.py fails when fixture disabled (real ChainerBackend detected) and passes when enabled; it only inspects backend type/env vars, never writes secrets. Verified every keyring-writing test is routed to the in-memory backend.
+- Item 2 (commit 482cf61): --selftest chat prints provider, model, keyring service/name, key length and first-4 prefix on every line, and HTTP status on failure. Keys shorter than 20 chars or starting with fake/test are rejected with "stored key is a placeholder, please re-enter it" instead of calling the provider.
+- Item 3 (commit 60547cd): Settings AI tab shows key status (saved / missing / looks like a placeholder, never the value) via Controller.get_llm_key_status(); user can paste a new key and press Test connection.
+- Item 4 (verification): ruff check . ✓, lint-imports 7 kept/0 broken ✓, python -m pytest -q ✓ (all tests pass, exit 0, no abort), tests/smoke ✓ (exit 0). Did NOT run --selftest because no real LLM key is installed; user must re-enter their Groq key in Credential Manager first.
+
 ## Stabilization (this session) — committed
 - PART 1 selftest (commit f01112b): `python -m secretary --selftest {chat|reminder|google|all}` runs the REAL composition root headless (real QApplication, store, controller, LLM client, keyring, scheduler thread, notifier, no fakes). Prints [PASS]/[FAIL] per step with exact exception text, no secrets. Registered `--selftest` in __main__.py.
 - PART 2 logging/excepthook (commit 3252df7): INFO logging at every chat hop (turn started, selected tools, LLM response, per tool call, finished) in agent/loop.py + controller.send_message; scheduler tick logs fired count and step exceptions (replaced prints) in scheduler/ticker.py. New src/secretary/errors.py installs sys.excepthook/threading.excepthook that log (redacted) and report to a UI reporter; wired in __main__.py so worker-thread and Qt-slot exceptions reach the UI as visible errors (Chat bubble / Settings message), never silent. ChatView and SettingsView display controller.error.
