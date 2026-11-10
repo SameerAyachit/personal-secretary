@@ -27,12 +27,20 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - python -m secretary --diagnose : DIAGNOSE OK
 - python -m secretary (offscreen) : main window opens, no crash
 
-## CURRENT PRIORITY (A–E) — verified against code + fresh output, 2026-11-09 — ALL DONE
-- A. SearchCache transaction fix — DONE: provider.py uses `Connection.write()`; db.py `write()` does BEGIN IMMEDIATE/COMMIT/ROLLBACK; `python -m secretary` opens main window offscreen.
-- B. Smoke test tests/smoke/test_startup.py — DONE: builds real composition root, offscreen Qt + temp data root, passes in suite.
-- C. lint-imports config — DONE: `[tool.importlinter]` + contracts in pyproject.toml; 7 kept, 0 broken (exit 0).
-- D. `asyncio_default_fixture_loop_scope = "function"` — DONE: pyproject.toml [tool.pytest.ini_options].
-- E. Test count — DONE: 125 collected, 125 passed (exit 0). "156" was an unverified claim (progress.md P2-07 line), never confirmed by running pytest.
+## CURRENT PRIORITY (a–f) — verified against code + fresh output, 2026-11-10 — ALL DONE
+
+Fresh command output (2026-11-10):
+- `ruff check .` : All checks passed
+- `python -m pytest -q` : 242 collected, 242 passed (exit 0)
+- `lint-imports` : 7 kept, 0 broken (exit 0)
+- `python -m secretary --diagnose` : DIAGNOSE OK (exit 0)
+
+- a. SQLite threading (scheduler steps / _repeat_alerts / _snooze_expiry / _sweeper) — DONE: `Connection` opened with `check_same_thread=False`; every store access goes through the writer lock in store/db.py (plan §5.4, commit f88fe55). E2E: tests/e2e/test_scheduler_threading.py passes — a reminder due now fires into the inbox from a worker thread.
+- b. Chat — DONE: `Controller.send_message` reads the active provider through one helper, `get_active_llm_key()` (config `llm.active`; keyring service `Secretary`, key `llm_api_key:{provider}` — the same service/name `diagnose` checks); no more `self.llm.active` AttributeError. Every failure emits `turn_status`/`turn_finished` error bubbles (never silent). Added `turn_status.emit("Thinking...")` before the turn; timeout message comes from agent/loop.py ("The turn timed out. Please try again."). E2E: tests/e2e/test_chat_llm.py — FakeLLM "hey" gets a reply; no configured key → error bubble.
+- c. Google sign-in — DONE: `GoogleOAuthFlow.run` logs each flow step (no secrets), requests `access_type=offline` + `prompt=consent`, and after storing the refresh token verifies `connected()` and raises `GoogleOAuthError` if the token was not stored. `Controller.connect_google` runs the flow on a background thread, logs every step, surfaces failures through the `error` signal (clear errors, never silent), and emits `google_connected` so the Settings label refreshes on the main thread via a queued signal. Root cause of the "stays not connected" bug: the token store was never verified after `set_secret`. E2E: tests/e2e/test_google_oauth.py — OAuth flow saves the refresh token and `controller.get_google_connected()` is True afterwards; also fixed tests/unit/integrations/google/test_oauth.py to fake `get_secret` so the new storage check is exercised.
+- d. Log redaction — DONE: `RedactionFilter`/`_redact_obj` mask only secret-like dict values (api_key, token, refresh_token, …); plain strings and list items stay readable, so whole messages are no longer replaced with "[REDACTED]". tests/unit/app/test_logging_setup.py passes.
+- e. Ctrl+C — DONE: `__main__.main()` installs `_install_quit_on_ctrl_c(app)` before `app.run()`; on Windows a console-control handler (installed via SetConsoleCtrlHandler, because `signal.SIGINT` is not delivered while Qt's `exec()` is blocked in the message loop) posts `quit()` to the GUI thread with `QMetaObject.invokeMethod(..., QueuedConnection)`; elsewhere `signal.signal(signal.SIGINT, app.quit)`. `finally: app.cleanup()` stops the worker thread and removes the single-instance socket, so Ctrl+C quits cleanly. Not end-to-end testable in this sandbox (the harness console does not deliver Ctrl+C events); verified by code review.
+- f. Real-composition-root e2e tests — DONE: tests/e2e/test_chat_llm.py (FakeLLM: "hey" gets a reply), tests/e2e/test_google_oauth.py (real threads: OAuth saves token, Settings updated via signal), tests/e2e/test_scheduler_threading.py (real worker thread + injectable tick: reminder fires into the inbox as the clock advances). All run in the phase gate via `python -m pytest -q` (242 passed, ruff ✓, lint-imports ✓, diagnose ✓). Scope note: "remind me to drink water in 1 minute" end-to-end through the LLM isn't wired yet (no `reminders_add` tool); reminder firing is covered at store/scheduler level by test_scheduler_threading.py.
 
 ## Current session (2026-11-08) — Phase 3 code-buildable work
 - src/secretary/tools/events.py (NEW): event_create (class B) and event_list (class A). Wired in __main__ registry + router.
