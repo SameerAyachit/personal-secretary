@@ -44,6 +44,20 @@ def get(con: sqlite3.Connection, reminder_id: int) -> dict | None:
     return row_to_dict(cur, row) if row else None
 
 
+def list_all(
+    con: sqlite3.Connection, *, status: str | None = None
+) -> list[dict]:
+    """Return non-deleted reminders, newest first (optionally filtered by status)."""
+    q = "SELECT * FROM reminders WHERE deleted_at IS NULL"
+    params: list[Any] = []
+    if status is not None:
+        q += " AND status=?"
+        params.append(status)
+    q += " ORDER BY datetime(next_fire_at) ASC NULLS LAST, id DESC"
+    cur = con.execute(q, params)
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
 def list_due(con: sqlite3.Connection, *, now_iso: str, limit: int = 200) -> list[dict]:
     cur = con.execute(
         "SELECT * FROM reminders WHERE deleted_at IS NULL AND status='scheduled' "

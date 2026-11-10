@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -37,7 +38,9 @@ class TasksView(QWidget):
 
         add_row = QHBoxLayout()
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Quick-add a task (e.g. \"buy groceries\")")
+        self._input.setPlaceholderText(
+            "Task or reminder (e.g. \"buy groceries\" / \"remind me to call at 5pm\")"
+        )
         self._input.returnPressed.connect(self._on_add)
         add_btn = QPushButton("Add")
         add_btn.setObjectName("Accent")
@@ -45,6 +48,11 @@ class TasksView(QWidget):
         add_row.addWidget(self._input)
         add_row.addWidget(add_btn)
         layout.addLayout(add_row)
+
+        self._status = QLabel("")
+        self._status.setStyleSheet("color: #5B6573; font-size: 12px;")
+        self._status.setHidden(True)
+        layout.addWidget(self._status)
 
         self._controller.tasks_changed.connect(self.refresh)
         self.refresh()
@@ -72,6 +80,12 @@ class TasksView(QWidget):
         title = self._input.text().strip()
         if not title:
             return
-        self._controller.create_task_manual(title, "")
+        if "remind" in title.lower():
+            self._controller.create_reminder_manual(title, "")
+            self._status.setText(f"Reminder created: {title}")
+        else:
+            self._controller.create_task_manual(title, "")
+            self._status.setText(f"Task created: {title}")
+        self._status.setHidden(False)
         self._input.clear()
         self.refresh()

@@ -25,6 +25,7 @@ from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
 from secretary.tools import planning as planning_tools
 from secretary.tools import registry as tools_registry
+from secretary.tools import reminders as reminders_tools
 from secretary.tools import research as research_tools
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
@@ -106,11 +107,15 @@ def main(argv: list[str] | None = None) -> int:
         email_tools.register(registry)
         events_tools.register(registry)
         planning_tools.register(registry)
+        reminders_tools.register(registry)
         research_tools.register(registry)
         router = Router(registry)
         router.route("tasks_add", ["task", "create", "add", "remind"])
         router.route("tasks_list", ["task", "list", "show", "remind"])
-        router.route("reminders_add", ["remind", "reminder"])
+        router.route("reminder_create", ["remind", "reminder"])
+        router.route("reminder_list", ["remind", "reminder", "list", "show"])
+        router.route("reminder_snooze", ["snooze", "reminder"])
+        router.route("reminder_cancel", ["cancel", "reminder", "delete"])
         router.route("email_send", ["send", "email"])
         router.route("web_search", ["search", "web"])
         router.route("event_create", ["event", "calendar", "meeting", "appointment"])
