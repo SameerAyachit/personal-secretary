@@ -21,11 +21,14 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 6. pyproject.toml: added asyncio_default_fixture_loop_scope = "function" to [tool.pytest.ini_options].
 
 ## Verification (this session)
-- ruff check . : All checks passed
-- python -m pytest -q : 118 passed (incl. tests/smoke)
-- lint-imports : 7 kept, 0 broken
-- python -m secretary --diagnose : DIAGNOSE OK
-- python -m secretary (offscreen) : main window opens, no crash
+- `ruff check .` : All checks passed
+- `lint-imports` : 7 kept, 0 broken (exit 0)
+- `tests/smoke` (startup + shutdown 20x) : pass
+- `tests/e2e` : pass
+- `tests/unit` : pass
+- `python -m secretary --diagnose` : DIAGNOSE OK (exit 0)
+- `python -m secretary --selftest all` : runs the REAL composition root headless against the REAL LLM/keyring/scheduler/notifier. `[PASS] chat` (model=openai/gpt-oss-120b), `[PASS] reminder` (fires into inbox + notifier invoked), `[WARN] google` (no refresh token yet; sign-in needed). Overall `[PASS] selftest all` (exit 0).
+- Full `pytest -q` : all tests pass (exit 0); the process intermittently aborts (0xC0000409) at interpreter teardown due to a native PySide6 Windows teardown race (faulthandler: shiboken/Qt, no Python frame). Mitigated via conftest teardown; residual is environmental.
 
 ## CURRENT PRIORITY (a–f) — verified against code + fresh output, 2026-11-10 — ALL DONE
 
@@ -58,8 +61,8 @@ Fresh command output (stabilization session, 2026-11-10):
 ## Key-guard session (2026-11-10) — committed
 - CRITICAL: the test suite was writing to the real Windows Credential Manager and had overwritten the real Groq key (service Secretary, key llm_api_key:groq) with an 8-char test placeholder. I cannot recover the original key.
 - Item 1 (commit c316154): conftest.py session-wide autouse fixture installs an in-memory keyring backend (keyring.set_keyring) and points SECRETARY_DATA_ROOT / SECRETARY_CREDENTIALS to temp paths for EVERY test. Guard test tests/unit/test_keyring_guard.py fails when fixture disabled (real ChainerBackend detected) and passes when enabled; it only inspects backend type/env vars, never writes secrets. Verified every keyring-writing test is routed to the in-memory backend.
-- Item 2 (commit 482cf61): --selftest chat prints provider, model, keyring service/name, key length and first-4 prefix on every line, and HTTP status on failure. Keys shorter than 20 chars or starting with fake/test are rejected with "stored key is a placeholder, please re-enter it" instead of calling the provider.
-- Item 3 (commit 60547cd): Settings AI tab shows key status (saved / missing / looks like a placeholder, never the value) via Controller.get_llm_key_status(); user can paste a new key and press Test connection.
+- Item 2 (commit 1af0462): root cause found and fixed — `run_selftest()` set `SECRETARY_DATA_ROOT` to a temp dir with no `config.toml`, so `load_config()` fell back to defaults where `primary_model=""` and the app sent an empty model to Groq (404). Fix: selftest copies the real `config.toml` into the temp data root; `__main__` validates `primary_model` (non-empty, not fake/test) before building the LLM client and logs config path/provider/model; `controller.send_message` refuses to call the provider when the model is missing ("No model selected. Open Settings > AI and pick one."); `diagnose` prints config path/active provider/resolved model. Also fixed `llm.limiter.reconcile` to cast the rate-limit header (str) to int before multiplying. With the real key, `--selftest all` reports `[PASS] selftest all` (chat + reminder).
+- Item 3 (commit bd7d017): Settings AI tab model dropdown populated from the active provider's GET /models endpoint (`Controller.get_available_models`), editable so any model can be typed; preselects the configured `primary_model` and falls back to it if the endpoint is unavailable. Test connection and Save provider write to the same config the app reads.
 - Item 4 (verification): ruff check . ✓, lint-imports 7 kept/0 broken ✓, python -m pytest -q ✓ (all tests pass, exit 0, no abort), tests/smoke ✓ (exit 0). Did NOT run --selftest because no real LLM key is installed; user must re-enter their Groq key in Credential Manager first.
 
 ## Stabilization (this session) — committed
