@@ -94,7 +94,7 @@ def _new_conn(data_root: Path) -> Connection:
     return conn
 
 
-def _build_controller(conn: Connection) -> Controller:
+def _build_controller(conn: Connection) -> tuple[Controller, dict]:
     registry, router = _build_registry_router()
     key = get_active_llm_key()
     if not key:
@@ -104,35 +104,58 @@ def _build_controller(conn: Connection) -> Controller:
     prov = cfg.llm.providers[provider]
     llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
     limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
-    return Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+    controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+    placeholder = len(key) < 20 or key.lower().startswith(("fake", "test"))
+    info = {
+        "provider": provider,
+        "model": prov.primary_model,
+        "service": "Secretary",
+        "key_name": f"llm_api_key:{provider}",
+        "key_length": len(key),
+        "key_prefix": key[:4],
+        "placeholder": placeholder,
+    }
+    return controller, info
+
+
+def _chat_meta(info: dict) -> str:
+    return (
+        f"(provider={info['provider']}, model={info['model']}, "
+        f"service={info['service']}, name={info['key_name']}, "
+        f"length={info['key_length']}, prefix={info['key_prefix']})"
+    )
 
 
 def _selftest_chat(data_root: Path) -> str:
     conn = _new_conn(data_root)
     try:
-        controller = _build_controller(conn)
+        controller, info = _build_controller(conn)
     except RuntimeError as exc:
         return f"[FAIL] chat: {exc}"
+    if info["placeholder"]:
+        return (
+            f"[FAIL] chat: stored key is a placeholder, please re-enter it {_chat_meta(info)}"
+        )
     replies = []
     controller.turn_finished.connect(replies.append)
     try:
         controller.send_message("hey")
     except Exception as exc:  # surface exact error, never secrets
-        return f"[FAIL] chat: send_message raised {type(exc).__name__}: {exc}"
+        return f"[FAIL] chat: send_message raised {type(exc).__name__}: {exc} {_chat_meta(info)}"
     if not _poll(lambda: bool(replies and replies[-1]), 30.0):
-        return "[FAIL] chat: no assistant reply within 30 s"
+        return f"[FAIL] chat: no assistant reply within 30 s {_chat_meta(info)}"
     reply = (replies[-1] or "").strip()
     if not reply:
-        return "[FAIL] chat: empty assistant reply"
+        return f"[FAIL] chat: empty assistant reply {_chat_meta(info)}"
     if reply.startswith("I hit an error:"):
-        return f"[FAIL] chat: provider error: {reply[:90]}"
-    return f"[PASS] chat: {reply[:90]}"
+        return f"[FAIL] chat: provider error: {reply[:90]} {_chat_meta(info)}"
+    return f"[PASS] chat: {reply[:90]} {_chat_meta(info)}"
 
 
 def _selftest_reminder(data_root: Path) -> str:
     conn = _new_conn(data_root)
     try:
-        controller = _build_controller(conn)
+        controller, _info = _build_controller(conn)
     except RuntimeError as exc:
         return f"[FAIL] reminder: {exc}"
     notifier = Notifier(None)
