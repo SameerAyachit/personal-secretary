@@ -176,6 +176,22 @@ class Controller(QObject):
             }
         return {"active": cfg.llm.active, "providers": providers}
 
+    def get_llm_key_status(self, provider: str | None = None) -> dict:
+        """Return LLM key status for the AI settings tab (never the value).
+
+        Status: "missing" (no key in Credential Manager), "placeholder"
+        (key shorter than 20 chars or starts with fake/test), or "saved".
+        """
+        cfg = load_config()
+        provider = provider or cfg.llm.active
+        key_name = f"llm_api_key:{provider}"
+        key = get_secret(key_name)
+        if not key:
+            return {"status": "missing", "provider": provider, "key_name": key_name}
+        if len(key) < 20 or key.lower().startswith(("fake", "test")):
+            return {"status": "placeholder", "provider": provider, "key_name": key_name}
+        return {"status": "saved", "provider": provider, "key_name": key_name}
+
     def set_theme(self, theme: str) -> None:
         """Persist the UI theme (system|light|dark)."""
         cfg = load_config()

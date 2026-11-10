@@ -133,26 +133,43 @@ class SettingsView(QWidget):
         grid.addWidget(QLabel("API key"), 2, 0)
         grid.addWidget(self._ai_key, 2, 1)
 
+        self._ai_key_status = QLabel()
+        self._ai_key_status.setObjectName("Caption")
+        grid.addWidget(self._ai_key_status, 3, 0, 1, 2)
+        self._refresh_ai_key_status()
+
         btn_test = QPushButton("Test connection")
         btn_test.setAccessibleName("Test LLM connection")
         btn_test.clicked.connect(self._on_ai_test)
-        grid.addWidget(btn_test, 3, 0)
+        grid.addWidget(btn_test, 4, 0)
 
         self._ai_status = QLabel()
         self._ai_status.setObjectName("Caption")
         self._ai_status.setHidden(True)
-        grid.addWidget(self._ai_status, 3, 1)
+        grid.addWidget(self._ai_status, 4, 1)
 
         btn_save = QPushButton("Save provider")
         btn_save.setAccessibleName("Save LLM provider")
         btn_save.clicked.connect(self._on_ai_save)
-        grid.addWidget(btn_save, 4, 0)
+        grid.addWidget(btn_save, 5, 0)
 
         return card
 
     def _on_ai_provider_changed(self, text: str) -> None:
         prov = self._controller.get_llm_config()["providers"][text]
         self._ai_model.setText(prov["model"])
+        self._refresh_ai_key_status()
+
+    def _refresh_ai_key_status(self) -> None:
+        """Show key status (saved / missing / placeholder), never the value."""
+        status = self._controller.get_llm_key_status()
+        label = {
+            "missing": "API key: missing",
+            "placeholder": "API key: looks like a placeholder, please re-enter it",
+            "saved": "API key: saved",
+        }.get(status["status"], f"API key: {status['status']}")
+        self._ai_key_status.setText(label)
+        self._ai_key_status.setHidden(False)
 
     def _on_ai_test(self) -> None:
         provider = self._ai_provider.currentText()
@@ -182,6 +199,7 @@ class SettingsView(QWidget):
             )
             self._ai_status.setText("Provider saved")
             self._ai_status.setHidden(False)
+            self._refresh_ai_key_status()
         except Exception as exc:  # surface exact error, never secrets
             self._ai_status.setText(f"Save failed: {exc}")
             self._ai_status.setHidden(False)
