@@ -299,6 +299,7 @@ class Controller(QObject):
                 "or use the quick-add field to create a task."
             )
             return
+        self.turn_status.emit("Thinking...")
         try:
             result = asyncio.run(
                 run_turn(
