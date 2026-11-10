@@ -42,6 +42,9 @@ from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
 from .ui.main_window import MainWindow
 
+# Windows console control event: Ctrl+C. 0 is the value of CTRL_C_EVENT.
+CTRL_C_EVENT = 0
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="secretary", description="Secretary personal assistant")
@@ -59,7 +62,6 @@ def _install_quit_on_ctrl_c(app) -> None:
     No secrets or credentials are touched here.
     """
     if sys.platform == "win32":
-        CTRL_C_EVENT = 0
 
         @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
         def _handler(ctrl_type: int) -> bool:
