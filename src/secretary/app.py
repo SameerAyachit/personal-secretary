@@ -17,6 +17,8 @@ from PySide6.QtCore import QThread
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
 
+from secretary.timeparse.when import warm_up
+
 _SOCKET_NAME = "SecretaryApp.SingleInstance"
 
 
@@ -32,6 +34,9 @@ class WorkerThread(QThread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._loop_ready = True
+        # Warm up slow imports (e.g. dateparser) on the worker thread so the
+        # first timed operation is not slow (plan §9.2, C-24).
+        warm_up()
         self._loop.run_forever()
         self._loop.close()
         self._loop = None

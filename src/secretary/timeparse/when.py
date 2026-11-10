@@ -103,3 +103,12 @@ def resolve_date(text: str, now: datetime, tz: str):
     else:
         dt = dt.astimezone(zone)
     return dt.date()
+
+
+def warm_up() -> None:
+    """Import and warm up dateparser on the worker thread (plan §9.2, C-24).
+
+    dateparser is slow to import (hundreds of ms); pay that cost once on the
+    worker thread at startup instead of on the first ``resolve_when`` call.
+    """
+    _ = dateparser.parse("now", settings={**_SETTINGS, "RELATIVE_BASE": datetime.now()})

@@ -12,6 +12,7 @@ from secretary.timeparse.when import (
     PastTime,
     normalize_text,
     resolve_when,
+    warm_up,
 )
 
 
@@ -84,3 +85,8 @@ def test_format_when():
     dt = _dt.datetime(2026, 11, 7, 20, 0, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
     s = format_when(dt, "Asia/Kolkata")
     assert "2026" in s and "Nov" in s and "20:00" in s
+
+
+def test_warm_up_runs_without_error():
+    # dateparser warm-up on the worker thread must not raise.
+    warm_up()
