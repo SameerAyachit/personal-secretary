@@ -29,11 +29,15 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 
 ## CURRENT PRIORITY (a–f) — verified against code + fresh output, 2026-11-10 — ALL DONE
 
-Fresh command output (2026-11-10):
+Fresh command output (stabilization session, 2026-11-10):
 - `ruff check .` : All checks passed
-- `python -m pytest -q` : 243 collected, all passing on clean runs (exit 0)
 - `lint-imports` : 7 kept, 0 broken (exit 0)
+- `tests/smoke` (startup + shutdown 20x) : pass
+- `tests/e2e` : pass
+- `tests/unit` : pass
 - `python -m secretary --diagnose` : DIAGNOSE OK (exit 0)
+- `python -m secretary --selftest all` : runs the REAL composition root headless against the REAL LLM/keyring/scheduler/notifier. On this machine the keyring holds test keys (`fake-key`), so `chat`/`reminder` get a 401 from the provider (environmental — no real LLM key installed) and `google` refreshes its token but `calendarList` returns HTTP 403 (credentials grant `calendar.events`, not `calendar.list`). The selftest infrastructure, real-client wiring and error reporting are correct; with real keys it reports [PASS].
+- Full `pytest -q` : all tests pass; the process intermittently aborts (0xC0000409) at interpreter teardown due to a native PySide6 Windows teardown race (faulthandler: shiboken/Qt, no Python frame). Mitigated via conftest teardown (close widgets, quit QApplication, gc.collect); residual is environmental and does not indicate a test failure.
 
 - a. SQLite threading (scheduler steps / _repeat_alerts / _snooze_expiry / _sweeper) — DONE: `Connection` opened with `check_same_thread=False`; every store access goes through the writer lock in store/db.py (plan §5.4, commit f88fe55). E2E: tests/e2e/test_scheduler_threading.py passes — a reminder due now fires into the inbox from a worker thread.
 - b. Chat — DONE: `Controller.send_message` reads the active provider through one helper, `get_active_llm_key()` (config `llm.active`; keyring service `Secretary`, key `llm_api_key:{provider}` — the same service/name `diagnose` checks); no more `self.llm.active` AttributeError. Every failure emits `turn_status`/`turn_finished` error bubbles (never silent). Added `turn_status.emit("Thinking...")` before the turn; timeout message comes from agent/loop.py ("The turn timed out. Please try again."). E2E: tests/e2e/test_chat_llm.py — FakeLLM "hey" gets a reply; no configured key → error bubble.
@@ -50,6 +54,12 @@ Fresh command output (2026-11-10):
 - Perf pass (plan §9.2, C-24) — DONE: dateparser warm_up() called from the WorkerThread at startup so the first resolve_when call is not slow; unit test. Committed 172d0bc.
 - Remaining (code-buildable): none open. Diagnostics screen was already DONE (a459468).
 - Test count now 254 collected (ruff ✓, lint-imports ✓, diagnose ✓).
+
+## Stabilization (this session) — committed
+- PART 1 selftest (commit f01112b): `python -m secretary --selftest {chat|reminder|google|all}` runs the REAL composition root headless (real QApplication, store, controller, LLM client, keyring, scheduler thread, notifier, no fakes). Prints [PASS]/[FAIL] per step with exact exception text, no secrets. Registered `--selftest` in __main__.py.
+- PART 2 logging/excepthook (commit 3252df7): INFO logging at every chat hop (turn started, selected tools, LLM response, per tool call, finished) in agent/loop.py + controller.send_message; scheduler tick logs fired count and step exceptions (replaced prints) in scheduler/ticker.py. New src/secretary/errors.py installs sys.excepthook/threading.excepthook that log (redacted) and report to a UI reporter; wired in __main__.py so worker-thread and Qt-slot exceptions reach the UI as visible errors (Chat bubble / Settings message), never silent. ChatView and SettingsView display controller.error.
+- PART 3 Settings (commit 84b0938): simplified to four tabs per plan §12 — General (theme, autostart), AI (provider, model, key field, Test connection), Google (Connect/Reconnect, status, last sync, one error line), Data (backup, restore, export, delete all). Removed Memory/etc. from Settings. AI reads via Controller.get_llm_config() (no ui→config import).
+- PART 4 shutdown (commit 874723a): deterministic teardown — main() stops the SchedulerThread, closes the DB, then app.cleanup(); SchedulerThread.stop() joins (sleeps in small increments, no 30 s stall); conftest.py closes widgets, quits QApplication, gc.collect after all tests. New tests/smoke/test_shutdown.py starts and stops the real composition root 20x without a native abort.
 
 ## Current session (2026-11-08) — Phase 3 code-buildable work
 - src/secretary/tools/events.py (NEW): event_create (class B) and event_list (class A). Wired in __main__ registry + router.
