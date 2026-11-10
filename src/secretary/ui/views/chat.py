@@ -45,11 +45,16 @@ class ChatView(QWidget):
         layout.addLayout(send_row)
 
         self._controller.turn_finished.connect(self._on_turn_finished)
+        self._controller.error.connect(self._on_controller_error)
 
     @Slot(str)
     def _on_turn_finished(self, text: str) -> None:
         if text:
             self._add_assistant(text)
+
+    @Slot(str, str)
+    def _on_controller_error(self, action: str, message: str) -> None:
+        self._add_assistant(f"Error: {message}")
 
     @Slot()
     def _on_send(self) -> None:

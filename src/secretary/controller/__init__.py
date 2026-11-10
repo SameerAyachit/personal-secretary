@@ -164,6 +164,18 @@ class Controller(QObject):
             "theme": cfg.app.theme,
         }
 
+    def get_llm_config(self) -> dict:
+        """Return LLM provider config for the AI settings tab (no secrets)."""
+        cfg = load_config()
+        providers: dict[str, dict] = {}
+        for name, prov in cfg.llm.providers.items():
+            providers[name] = {
+                "base_url": prov.base_url,
+                "model": prov.primary_model,
+                "key_name": prov.key_name,
+            }
+        return {"active": cfg.llm.active, "providers": providers}
+
     def set_theme(self, theme: str) -> None:
         """Persist the UI theme (system|light|dark)."""
         cfg = load_config()
@@ -306,6 +318,7 @@ class Controller(QObject):
             )
             return
         self.turn_status.emit("Thinking...")
+        logger.info("chat turn %s: send_message user_text=%r", self._turn_id, text)
         try:
             result = asyncio.run(
                 run_turn(
@@ -319,8 +332,10 @@ class Controller(QObject):
                 )
             )
         except Exception as exc:
+            logger.exception("chat turn %s: run_turn raised", self._turn_id)
             self.turn_finished.emit(f"I hit an error: {exc}")
             return
+        logger.info("chat turn %s: finished", self._turn_id)
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -23,6 +24,8 @@ from secretary.llm.tokens import count_tokens
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.tools.idempotency import idempotency_key
 from secretary.tools.registry import Registry, SafetyClass
+
+logger = logging.getLogger(__name__)
 
 MAX_STEPS = 5
 TURN_TIMEOUT_SECONDS = 90
@@ -126,6 +129,8 @@ async def run_turn(
     recent_sigs: list[str] = []
     messages = _build_context(user_text, ctx)
     selected = router.select(user_text, ctx or {})
+    logger.info("chat turn %s: started selected_tools=%s", turn_id,
+                [t.name for t in selected])
     tool_schemas = list(
         {s["name"]: s for s in registry.schemas() if s["name"] in {t.name for t in selected}}.values()
     ) or list(registry.schemas())
@@ -152,6 +157,8 @@ async def run_turn(
         resp = normalize_response(
             resp, allowed_tools={s["name"] for s in tool_schemas}
         )
+        logger.info("chat turn %s: LLM response tools=%d", turn_id,
+                    len(resp.tool_calls))
         if not resp.tool_calls:
             return resp.text or "I'm not sure how to help with that."
 
@@ -175,6 +182,7 @@ async def run_turn(
             recent_sigs.pop(0)
 
         for call in calls:
+            logger.info("chat turn %s: tool call %s", turn_id, call.name)
             result = await _execute_call(call, registry, conn, turn_id)
             messages.append(
                 {
