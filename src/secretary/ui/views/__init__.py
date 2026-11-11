@@ -1,1 +1,1 @@
-"""UI views: today, chat, tasks, calendar, inbox, approvals, research, settings, onboarding."""
+"""UI views: today, chat, tasks, calendar, inbox, approvals, planner, research, settings, onboarding."""

@@ -57,7 +57,7 @@ Fresh command output (this session, run with .venv python):
 | Tray overflow hint | DONE (commit 892e127) | src/secretary/ui/tray.py (moved from notify/tray.py to satisfy the ui→notify import-linter contract); tray menu lists recent unacknowledged inbox items with a disabled "+N more" overflow hint; tooltip shows count; clicking an item opens the Inbox view. tests/notifier/test_tray.py (4 tests); ruff ✓, pytest ✓, lint-imports ✓ |
 | Timezone change banner | DONE (commit 9408925) | scheduler tick compares system time zone signature against the stored value; on change creates a system inbox item + toast notification once per change and stores the new signature. tests/scheduler/test_timezone_banner.py (3 tests); ruff ✓, pytest ✓, lint-imports ✓ |
 | Two-priority limiter | DONE (this commit) | llm/limiter.py: two priority classes (interactive/background) share one token bucket; background yields while an interactive call waits. run_turn passes priority via turn context; Controller.send_message accepts priority. tests/unit/llm/test_limiter.py (2 new tests); ruff OK, pytest OK, lint-imports OK |
-| Code-assisted planner | NOT STARTED | `plan_day` tool exists (free slots); no planner UI yet (C-54 deferred) |
+| Code-assisted planner | DONE (this session) | `PlannerView` + rail item, `Controller.get_free_slots`/`create_task_at` wrapping `plan_day` (code computes 9:00-17:00 free slots); `tests/ui/test_planner_view.py` (3 tests); ruff OK, pytest OK, lint-imports OK |
 | Source-bound claim checker | NOT STARTED | claim removal exists inside `research_brief` tool; no standalone feature/exposure |
 | README final pass | NOT STARTED | — |
 

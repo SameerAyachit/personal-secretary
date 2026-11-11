@@ -46,6 +46,7 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
+from secretary.tools.planning import plan_day
 from secretary.tools.research import research_brief_tool
 
 logger = logging.getLogger(__name__)
@@ -458,6 +459,34 @@ class Controller(QObject):
             self.research_brief_finished.emit({"brief": "", "sources": [], "error": f"Research failed: {exc}"})
             return
         self.research_brief_finished.emit(result or {"brief": "", "sources": []})
+
+    def create_task_at(self, title: str, start_at_iso: str, tz: str = "Asia/Kolkata") -> None:
+        """Create a task scheduled at a given local time (planner slot)."""
+        self._turn_id += 1
+        turn_id = f"manual-{self._turn_id}"
+        try:
+            tasks_repo.create(
+                self.conn,
+                title=title,
+                notes="",
+                due_at=start_at_iso,
+                due_tz=tz,
+                source="user",
+                turn_id=turn_id,
+            )
+            self.tasks_changed.emit()
+            self.turn_status.emit(f"Task created: {title}")
+        except Exception as exc:
+            self.error.emit("task_create", str(exc))
+
+    def get_free_slots(self, date_iso: str, tz: str = "Asia/Kolkata", min_duration_minutes: int = 30) -> dict:
+        """Code-assisted planner: compute free slots in a day (9:00-17:00 local)
+        around existing calendar events. Returns {date, tz, free_slots}."""
+        return plan_day(
+            self.conn,
+            "planner",
+            {"date_text": date_iso, "tz": tz, "min_duration_minutes": min_duration_minutes},
+        )
 
     @Slot(str)
     def undo(self, token: str) -> None:
