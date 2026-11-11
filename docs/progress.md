@@ -54,7 +54,7 @@ Fresh command output (this session, run with .venv python):
 | Gmail triage job | DONE (commit 4adbd33) | `src/secretary/scheduler/triage_job.py` (sync + classify, caps 15 msgs / 500-char body, no network in DB transaction), wired into `scheduler/ticker.py` tick + `__main__` (gmail client when Google connected); `tests/scheduler/test_triage_job.py` (9 tests); ruff ✓, pytest ✓, lint-imports ✓ |
 | Drafts and approvals UI with code-built summaries | DONE (verified) | `ApprovalsView` (code-built `row["summary"]`, recipient highlighting with "(new)"), `Controller.list_pending_actions`/approve/reject, send with payload re-verification and draft-change refusal (src/secretary/controller/__init__.py ~463-515) |
 | Research brief UI and citation check | DONE (commit 4f3e394) | `ResearchView` + rail item, `Controller.run_research_brief` on the worker loop with `research_brief_finished` signal; `tests/ui/test_research_view.py` (3 tests); ruff ✓, pytest ✓, lint-imports ✓ |
-| Tray overflow hint | NOT STARTED | C-4 deferred (docs/BUILD_REPORT.md) |
+| Tray overflow hint | DONE (commit 892e127) | src/secretary/ui/tray.py (moved from notify/tray.py to satisfy the ui→notify import-linter contract); tray menu lists recent unacknowledged inbox items with a disabled "+N more" overflow hint; tooltip shows count; clicking an item opens the Inbox view. tests/notifier/test_tray.py (4 tests); ruff ✓, pytest ✓, lint-imports ✓ |
 | Timezone change banner | NOT STARTED | C-23 deferred |
 | Two-priority limiter | NOT STARTED | C-53 deferred |
 | Code-assisted planner | NOT STARTED | `plan_day` tool exists (free slots); no planner UI yet (C-54 deferred) |

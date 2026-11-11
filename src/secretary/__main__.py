@@ -220,7 +220,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except Exception as exc:  # never let triage break startup
                 logger.warning("gmail triage job unavailable: %s", exc)
-        scheduler = SchedulerThread(conn, on_fired=on_fired, gmail_client=gmail_client)
+        scheduler = SchedulerThread(
+            conn, on_fired=on_fired, gmail_client=gmail_client, notifier=notifier
+        )
         scheduler.start()
 
         window.quick_capture = quick_capture

@@ -4,7 +4,8 @@ Runs on its own thread. Every tick (30 s):
   1. fire due reminders (atomic, one transaction per reminder),
   2. inbox repeat alerts,
   3. snooze expiry,
-  4. sweeper (expire pending_actions).
+  4. sweeper (expire pending_actions),
+  5. timezone change banner (when the system time zone changes).
 
 Notification (toast/popup) happens **after** the DB commit so a crash between
 commit and toast still leaves an unacknowledged inbox row that the UI shows on
@@ -16,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -24,6 +26,7 @@ from PySide6.QtCore import QThread
 from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import settings as settings_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
 
 logger = logging.getLogger(__name__)
@@ -128,14 +131,50 @@ def _sweeper(conn: sqlite3.Connection) -> None:
     )
 
 
+def _tz_signature() -> str:
+    """Signature of the current system time zone (offset + DST state + names)."""
+    return f"{time.timezone}:{time.altzone}:{time.tzname[0]}:{time.tzname[1]}"
+
+
+def _timezone_banner_step(conn: Connection, notifier) -> None:
+    """Show one banner when the system time zone changes (plan C-23).
+
+    Creates an inbox item and asks the notifier to toast once per change;
+    the stored signature is updated so the banner does not repeat.
+    """
+    current = _tz_signature()
+    stored = settings_repo.get(conn, "system_timezone")
+    changed = stored is not None and stored != current
+
+    def _persist(con: sqlite3.Connection) -> None:
+        settings_repo.set(con, "system_timezone", current, turn_id="timezone-banner")
+        if changed:
+            inbox_repo.create(
+                con,
+                kind="system",
+                title="Time zone changed",
+                body="Your system time zone changed; reminder times now follow the new time zone.",
+                turn_id="timezone-banner",
+            )
+
+    conn.write(_persist)
+    if changed and notifier is not None:
+        notifier.notify(
+            "Time zone changed",
+            "Your system time zone changed; reminder times now follow the new time zone.",
+            priority=True,
+        )
+
+
 def tick(
     conn: Connection,
     on_fired=None,
     gmail_client=None,
     classify=None,
+    notifier=None,
 ) -> None:
     """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper,
-    and the Gmail triage job (plan §13.4)."""
+    the Gmail triage job (plan §13.4), and the timezone change banner (C-23)."""
     logger.info("scheduler tick: started")
     try:
         due = conn.write(_fire_due)
@@ -165,6 +204,13 @@ def tick(
             )
     except Exception:
         logger.exception("scheduler triage job failed")
+    # Timezone change banner (plan C-23): when the system time zone changes,
+    # show an inbox item + toast. Runs on every tick; the stored value is
+    # updated so the banner shows once per change.
+    try:
+        _timezone_banner_step(conn, notifier)
+    except Exception:
+        logger.exception("scheduler timezone banner failed")
     logger.info("scheduler tick: finished")
 
 
@@ -177,12 +223,14 @@ class SchedulerThread(QThread):
         on_fired=None,
         gmail_client=None,
         classify=None,
+        notifier=None,
     ) -> None:
         super().__init__()
         self._conn = conn
         self._on_fired = on_fired
         self._gmail_client = gmail_client
         self._classify = classify
+        self._notifier = notifier
         self._running = True
 
     def run(self) -> None:  # type: ignore[override]
@@ -192,6 +240,7 @@ class SchedulerThread(QThread):
                 self._on_fired,
                 gmail_client=self._gmail_client,
                 classify=self._classify,
+                notifier=self._notifier,
             )
             # Sleep in small increments so stop() is responsive and shutdown is
             # deterministic (no 30 s wait stuck in msleep).
