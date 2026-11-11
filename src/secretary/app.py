@@ -17,6 +17,8 @@ from PySide6.QtCore import QThread
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import QApplication
 
+from secretary.util.main_thread_watchdog import MainThreadWatchdog
+
 _SOCKET_NAME = "SecretaryApp.SingleInstance"
 
 
@@ -67,6 +69,7 @@ class App:
         self.worker = WorkerThread()
         self.server: QLocalServer | None = None
         self._is_primary = self._acquire_single_instance()
+        self.watchdog = MainThreadWatchdog()
 
     def _acquire_single_instance(self) -> bool:
         """Return True if this process owns the single-instance lock."""
@@ -98,6 +101,7 @@ class App:
 
     def cleanup(self) -> None:
         self.stop_worker()
+        self.watchdog.stop()
         if self.server is not None:
             self.server.close()
             QLocalServer.removeServer(_SOCKET_NAME)

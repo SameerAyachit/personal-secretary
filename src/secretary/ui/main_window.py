@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,14 +18,28 @@ from PySide6.QtWidgets import (
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme, resolve_theme
 from secretary.ui.views import approvals, chat, events, inbox, settings, tasks, today
+from secretary.util.main_thread_watchdog import MainThreadWatchdog
 
 
 class MainWindow(QMainWindow):
     """Single Secretary window. Closing hides to tray; tray Quit is the only exit."""
 
-    def __init__(self, controller: Controller) -> None:
+    def __init__(
+        self,
+        controller: Controller,
+        watchdog: MainThreadWatchdog | None = None,
+    ) -> None:
         super().__init__()
         self._controller = controller
+
+        # Heartbeat for the main-thread watchdog (plan C-27): beat every 50 ms
+        # on the GUI thread so a stalled main thread is detected and traced.
+        if watchdog is not None:
+            self._heartbeat = QTimer(self)
+            self._heartbeat.setInterval(50)
+            self._heartbeat.timeout.connect(watchdog.beat)  # type: ignore[arg-type]
+            self._heartbeat.start()
+
         self.setWindowTitle("Secretary")
         self.setMinimumSize(900, 600)
 

@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="secretary", description="Secretary personal assistant")
     parser.add_argument("--minimized", action="store_true", help="start hidden to the tray")
     parser.add_argument("--diagnose", action="store_true", help="run diagnostics and exit")
-    parser.add_argument("--selftest", metavar="NAME", help="run a real-machine selftest (chat|reminder|google|all)")
+    parser.add_argument("--selftest", metavar="NAME", help="run a real-machine selftest (chat|reminder|google|google-live|notify|all)")
     return parser
 
 
@@ -109,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     _install_quit_on_ctrl_c(app)
 
     app.start_worker()
+    app.watchdog.start()
     conn = None
     scheduler = None
     try:
@@ -167,10 +168,17 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=model)
                 limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
-        controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+        controller = Controller(
+            conn,
+            registry=registry,
+            router=router,
+            llm=llm,
+            limiter=limiter,
+            submit_coro=app.worker.submit,
+        )
         install_reporter(controller.error.emit)
         conn.llm = llm  # research_brief uses it; None when no LLM key is configured
-        window = MainWindow(controller)
+        window = MainWindow(controller, watchdog=app.watchdog)
 
         # Search provider + cache + breaker.
         provider = DDGSSearchProvider()
