@@ -94,7 +94,7 @@ Total unit/integration/UI tests: **156 passing**. `ruff check .`: green. `lint-i
 | C-24 | Deferred | `dateparser` lazy-warm not implemented. |
 | C-25 | Handled | Recurrence computes next occurrence from rule (not `+timedelta`). |
 | C-26 | Handled | Snooze affects inbox item only; series advances independently. |
-| C-27 | Deferred | Heartbeat watchdog not implemented. |
+| C-27 | Handled | Main-thread heartbeat watchdog: `src/secretary/util/main_thread_watchdog.py` watches a GUI-thread QTimer heartbeat (50 ms); on a 5 s missed heartbeat it logs and calls `faulthandler.dump_traceback()`. Wired into `App` (started in `main()`, stopped in `cleanup()`) and `MainWindow` (50 ms beat timer). Verified by tests/e2e/test_heartbeat.py (failed first on the blocking notifier, 1.578 s gap; passes after the toast send was moved off the GUI thread) and tests/unit/util/test_main_thread_watchdog.py. Commit 1abd94a. |
 | C-28 | Handled | FTS5 startup self-check (`CREATE VIRTUAL TABLE temp.t USING fts5(x)`). |
 | C-29 | Handled | Single writer behind `RLock`; WAL; `busy_timeout=5000`; short transactions. |
 | C-30 | Handled | SQLite online backup API (`Connection.backup`). |
