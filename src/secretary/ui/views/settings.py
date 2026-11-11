@@ -270,10 +270,16 @@ class SettingsView(QWidget):
         self._google_button.clicked.connect(self._on_connect_google)
         grid.addWidget(self._google_button, 2, 0)
 
-        self._google_disconnect = QPushButton("Reconnect Google")
-        self._google_disconnect.setAccessibleName("Reconnect Google")
+        self._google_disconnect = QPushButton("Disconnect")
+        self._google_disconnect.setAccessibleName("Disconnect Google")
         self._google_disconnect.clicked.connect(self._on_disconnect_google)
         grid.addWidget(self._google_disconnect, 2, 1)
+
+        self._google_reconnect = QPushButton("Reconnect Google")
+        self._google_reconnect.setAccessibleName("Reconnect Google")
+        self._google_reconnect.clicked.connect(self._on_connect_google)
+        grid.addWidget(self._google_reconnect, 2, 2)
+        self._google_reconnect.setVisible(False)
 
         self._google_error = QLabel()
         self._google_error.setObjectName("Caption")
@@ -295,12 +301,14 @@ class SettingsView(QWidget):
             if connected
             else "Google: not connected (click Connect Google)"
         )
+        self._google_button.setVisible(not connected)
+        self._google_button.setText("Connect Google")
+        self._google_button.setAccessibleName("Connect Google")
         self._google_button.setEnabled(not connected)
-        self._google_button.setText("Reconnect Google" if connected else "Connect Google")
-        self._google_button.setAccessibleName(
-            "Reconnect Google" if connected else "Connect Google"
-        )
+        self._google_disconnect.setVisible(connected)
         self._google_disconnect.setEnabled(connected)
+        self._google_reconnect.setVisible(connected)
+        self._google_reconnect.setEnabled(connected)
         sync = self._controller.get_google_sync_status()
         if sync.get("failed"):
             self._sync_status.setText(f"Google sync: failed ({sync.get('error', '')})")

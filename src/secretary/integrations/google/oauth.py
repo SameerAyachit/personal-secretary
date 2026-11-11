@@ -52,16 +52,25 @@ def is_invalid_grant(exc: BaseException) -> bool:
 
 
 class _RedirectHandler(BaseHTTPRequestHandler):
-    """Captures the ``?code=...`` from the loopback redirect and stops the server."""
+    """Captures the ``?code=...`` (or ``?error=...``) from the loopback redirect.
 
-    code: str | None = None
-    error: str | None = None
+    Stores results on the server instance (not class-level) so each flow has
+    its own state; only one flow runs at a time (plan D14). Non-redirect
+    requests (favicon, etc.) are ignored.
+    """
 
     def do_GET(self):  # http.server override name
         params = parse_qs(urlparse(self.path).query)
+        server = self.server
+        # Ignore requests that are not the OAuth redirect (favicon, etc.).
+        if "code" not in params and "error" not in params:
+            self.send_response(404)
+            self.end_headers()
+            return
         if "code" in params:
-            _RedirectHandler.code = params["code"][0]
-            _RedirectHandler.error = None
+            server._handler_code = params["code"][0]
+            server._handler_error = None
+            server._handler_error_description = None
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -69,7 +78,9 @@ class _RedirectHandler(BaseHTTPRequestHandler):
                 b"Authorization complete. You can close this window."
             )
         else:
-            _RedirectHandler.error = params.get("error", ["unknown"])[0]
+            server._handler_error = params.get("error", ["unknown"])[0]
+            descs = params.get("error_description", [])
+            server._handler_error_description = descs[0] if descs else ""
             self.send_response(400)
             self.end_headers()
 
@@ -78,7 +89,14 @@ class _RedirectHandler(BaseHTTPRequestHandler):
 
 
 class GoogleOAuthFlow:
-    """Run the installed-app OAuth consent flow and store the refresh token."""
+    """Run the installed-app OAuth consent flow and store the refresh token.
+
+    One flow at a time (plan D14): per-flow state in the handler instance,
+    state parameter verified, non-redirect requests ignored, Google's error
+    and error_description included in failures, browser opened once.
+    """
+
+    _flow_running = False
 
     def __init__(
         self,
@@ -151,8 +169,16 @@ class GoogleOAuthFlow:
         try:
             response = httpx.post(self.token_uri, data=data, timeout=30.0)
             response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise GoogleOAuthError(f"token exchange failed: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            body = ""
+            try:
+                err = exc.response.json().get("error", {})
+                body = f"{err.get('error','')} {err.get('error_description','')}".strip()
+            except Exception:
+                pass
+            raise GoogleOAuthError(
+                f"token exchange failed: {exc} {body}".strip()
+            ) from exc
         return response.json()
 
     # ---------------------------------------------------------------- loopback server
@@ -163,25 +189,32 @@ class GoogleOAuthFlow:
             return server.server_address[1]
 
     def _run_server(self, port: int) -> str:
-        _RedirectHandler.code = None
-        _RedirectHandler.error = None
         server = HTTPServer(("127.0.0.1", port), _RedirectHandler)
+        server._handler_code = None
+        server._handler_error = None
+        server._handler_error_description = None
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
         try:
             # Wait for the redirect handler to capture the code (or an error).
-            # serve_forever() runs on server_thread, so shutdown() below is
-            # called from a different thread and cannot deadlock.
-            deadline = time.time() + 120
-            while _RedirectHandler.code is None and _RedirectHandler.error is None:
+            # 3-minute timeout (plan D14).
+            deadline = time.time() + 180
+            while (
+                server._handler_code is None and server._handler_error is None
+            ):
                 if time.time() > deadline:
                     raise GoogleOAuthError("OAuth flow timed out waiting for redirect")
                 time.sleep(0.05)
-            if _RedirectHandler.error:
-                raise GoogleOAuthError(f"OAuth flow failed: {_RedirectHandler.error}")
-            if not _RedirectHandler.code:
+            handler_error = server._handler_error
+            handler_error_desc = server._handler_error_description or ""
+            if handler_error:
+                raise GoogleOAuthError(
+                    f"OAuth flow failed: {handler_error} {handler_error_desc}".strip()
+                )
+            handler_code = server._handler_code
+            if not handler_code:
                 raise GoogleOAuthError("OAuth flow returned no authorization code")
-            return _RedirectHandler.code
+            return handler_code
         finally:
             server.shutdown()
             server.server_close()
@@ -190,31 +223,40 @@ class GoogleOAuthFlow:
     # ---------------------------------------------------------------- run
 
     def run(self) -> str:
-        """Run the full consent flow; return the refresh token."""
-        logger.info("google oauth flow starting")
-        port = self._pick_port()
-        redirect_uri = f"http://127.0.0.1:{port}/"
-        state = _secrets.token_urlsafe(16)
-        code_verifier, code_challenge = self._make_pkce_pair()
-        url = self.authorization_url(state, code_challenge, redirect_uri)
-        logger.info("google consent url opened in browser")
-        webbrowser.open(url)
-        code = self._run_server(port)
-        logger.info("google authorization code received")
-        tokens = self.exchange_code(code, code_verifier, redirect_uri)
-        refresh_token = tokens.get("refresh_token")
-        if not refresh_token:
-            raise GoogleOAuthError(
-                "no refresh token in token response (try prompt=consent)"
-            )
-        set_secret(REFRESH_TOKEN_KEY, refresh_token)
-        set_secret(CLIENT_ID_KEY, self.client_id)
-        if not connected():
-            raise GoogleOAuthError(
-                "refresh token was not stored in Credential Manager"
-            )
-        logger.info("google refresh token stored in Credential Manager")
-        return refresh_token
+        """Run the full consent flow; return the refresh token.
+
+        Only one flow may run at a time; the browser is opened once.
+        """
+        if self._flow_running:
+            raise GoogleOAuthError("An OAuth flow is already in progress")
+        self._flow_running = True
+        try:
+            logger.info("google oauth flow starting")
+            port = self._pick_port()
+            redirect_uri = f"http://127.0.0.1:{port}/"
+            state = _secrets.token_urlsafe(16)
+            code_verifier, code_challenge = self._make_pkce_pair()
+            url = self.authorization_url(state, code_challenge, redirect_uri)
+            logger.info("google consent url opened in browser")
+            webbrowser.open(url)
+            code = self._run_server(port)
+            logger.info("google authorization code received")
+            tokens = self.exchange_code(code, code_verifier, redirect_uri)
+            refresh_token = tokens.get("refresh_token")
+            if not refresh_token:
+                raise GoogleOAuthError(
+                    "no refresh token in token response (try prompt=consent)"
+                )
+            set_secret(REFRESH_TOKEN_KEY, refresh_token)
+            set_secret(CLIENT_ID_KEY, self.client_id)
+            if not connected():
+                raise GoogleOAuthError(
+                    "refresh token was not stored in Credential Manager"
+                )
+            logger.info("google refresh token stored in Credential Manager")
+            return refresh_token
+        finally:
+            self._flow_running = False
 
 
 def connected() -> bool:

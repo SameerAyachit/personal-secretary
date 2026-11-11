@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QThread
 
+from secretary.integrations.google.calendar import sync_calendar
 from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
@@ -185,11 +186,13 @@ def tick(
     conn: Connection,
     on_fired=None,
     gmail_client=None,
+    calendar_client=None,
     classify=None,
     notifier=None,
 ) -> None:
     """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper,
-    the Gmail triage job (plan §13.4), and the timezone change banner (C-23)."""
+    the Gmail triage job (plan §13.4), Calendar sync (plan §13), and the
+    timezone change banner (C-23)."""
     logger.info("scheduler tick: started")
     try:
         due = conn.write(_fire_due)
@@ -227,6 +230,21 @@ def tick(
             )
     except Exception:
         logger.exception("scheduler triage job failed")
+    # Calendar sync: windowed sync with nextSyncToken (plan §13).
+    # Runs on connect and every tick; failures are logged, never fatal.
+    if calendar_client is not None:
+        try:
+            result = sync_calendar(conn, calendar_client, "primary")
+            logger.info(
+                "scheduler calendar sync: synced=%d deleted=%d",
+                result.get("synced", 0),
+                result.get("deleted", 0),
+            )
+            settings_repo.set(conn, "google_last_sync", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), turn_id="google-sync")
+        except Exception as exc:
+            logger.exception("scheduler calendar sync failed")
+            settings_repo.set(conn, "google_sync_failed", "1", turn_id="google-sync")
+            settings_repo.set(conn, "google_sync_error", str(exc), turn_id="google-sync")
     # Timezone change banner (plan C-23): when the system time zone changes,
     # show an inbox item + toast. Runs on every tick; the stored value is
     # updated so the banner shows once per change.
@@ -245,6 +263,7 @@ class SchedulerThread(QThread):
         conn: Connection,
         on_fired=None,
         gmail_client=None,
+        calendar_client=None,
         classify=None,
         notifier=None,
     ) -> None:
@@ -252,6 +271,7 @@ class SchedulerThread(QThread):
         self._conn = conn
         self._on_fired = on_fired
         self._gmail_client = gmail_client
+        self._calendar_client = calendar_client
         self._classify = classify
         self._notifier = notifier
         self._running = True
@@ -262,6 +282,7 @@ class SchedulerThread(QThread):
                 self._conn,
                 self._on_fired,
                 gmail_client=self._gmail_client,
+                calendar_client=self._calendar_client,
                 classify=self._classify,
                 notifier=self._notifier,
             )

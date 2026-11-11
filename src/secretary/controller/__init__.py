@@ -26,6 +26,9 @@ from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
 from secretary.autostart import set_enabled as _autostart_set_enabled
 from secretary.config import load_config, save_config
+from secretary.integrations.google.auth import GoogleAuth
+from secretary.integrations.google.calendar import CalendarClient
+from secretary.integrations.google.gmail import GmailClient
 from secretary.integrations.google.oauth import (
     GoogleOAuthError,
     GoogleOAuthFlow,
@@ -436,6 +439,7 @@ class Controller(QObject):
             flow = GoogleOAuthFlow.from_credentials_file(creds_path)
             logger.info("google consent flow starting (browser + loopback)")
             flow.run()
+            self.rebuild_google_client()
             logger.info("google refresh token stored in Credential Manager")
         except FileNotFoundError:
             msg = (
@@ -466,6 +470,27 @@ class Controller(QObject):
         with contextlib.suppress(Exception):
             disconnect()
         self.google_connected.emit()
+
+    def rebuild_google_client(self) -> None:
+        """Rebuild Gmail + Calendar clients when Google connects (no restart).
+
+        Called from the UI after a successful OAuth flow so the scheduler can
+        start syncing without restarting the app (plan D16).
+        """
+        self._gmail_client = None
+        self._calendar_client = None
+        if not self.get_google_connected() or not credentials_path().exists():
+            return
+        try:
+            creds = json.loads(credentials_path().read_text(encoding="utf-8"))
+            installed = creds.get("installed") or creds.get("web") or {}
+            client_id = installed.get("client_id", "")
+            client_secret = installed.get("client_secret", "")
+            auth = GoogleAuth(client_id, client_secret)
+            self._gmail_client = GmailClient(auth)
+            self._calendar_client = CalendarClient(auth)
+        except Exception as exc:  # never let client rebuild break the UI
+            logger.warning("Google client rebuild failed: %s", exc)
 
     def list_events(self, start_iso: str | None = None, end_iso: str | None = None) -> list[dict]:
         """Return calendar events in [start_iso, end_iso)."""
@@ -771,7 +796,7 @@ class Controller(QObject):
             self.turn_status.emit("Send refused: draft changed since approval.")
         else:
             pa_repo.decide(self.conn, pending_id, "executed", turn_id="manual")
-            self.turn_status.emit("Email sent.")
+            self.turn_status.emit("Approved, sending is not enabled yet.")
 
     # ---- Data: backups, restore, delete-all, export (plan §5.5, §941-942) ----
 
