@@ -115,6 +115,16 @@ class Controller(QObject):
         # persistent worker loop (plan §3.1), never on the Qt main thread, so the
         # UI stays responsive and the shared httpx client keeps one event loop.
         self._submit_coro = submit_coro
+        # Background references (set by __main__ after creation) so data-safety
+        # operations can stop them before wiping the DB (plan E18).
+        self._scheduler = None
+        self._worker = None
+
+    def set_scheduler(self, scheduler) -> None:
+        self._scheduler = scheduler
+
+    def set_worker(self, worker) -> None:
+        self._worker = worker
     def list_tasks(self) -> list[dict]:
         """Return open tasks (for the UI to display)."""
         try:
@@ -818,11 +828,17 @@ class Controller(QObject):
         return {"name": dst.name, "path": str(dst)}
 
     def restore_backup(self, backup_name: str) -> dict:
-        """Restore a backup: safety-copy the current DB, replace it, then quit
-        so the app restarts into the restored data (Settings Data 'Restore')."""
+        """Restore a backup: stop background threads, safety-copy the current DB,
+        replace it, then quit so the app restarts into the restored data
+        (Settings Data 'Restore')."""
+        self._stop_background()
         src = backups_dir() / backup_name
         if not src.exists():
             return {"error": "backup not found"}
+        # Do not replace a database that is open.
+        if self.conn is not None and self.conn._con is not None:
+            with contextlib.suppress(Exception):
+                self.conn.close()
         safety = restore(src, db_path())
         app = QApplication.instance()
         if app is not None:
@@ -832,6 +848,7 @@ class Controller(QObject):
     def delete_all_data(self) -> dict:
         """Wipe the DB, backups, logs and Credential Manager entries, then quit
         (Settings Data 'Delete all data', plan §941)."""
+        self._stop_background()
         self.conn.close()
         db = db_path()
         with contextlib.suppress(FileNotFoundError):
@@ -844,13 +861,36 @@ class Controller(QObject):
             shutil.rmtree(bd)
         ld = logs_dir()
         if ld.exists():
+            # Close logging handlers before deleting the logs folder.
+            for handler in logging.root.handlers[:]:
+                handler.close()
+                logging.root.removeHandler(handler)
+            for name in logging.Logger.manager.loggerDict:
+                logger_obj = logging.Logger.manager.loggerDict[name]
+                if isinstance(logger_obj, logging.Logger):
+                    for handler in logger_obj.handlers[:]:
+                        handler.close()
+                        logger_obj.removeHandler(handler)
             shutil.rmtree(ld)
+        # Remove LLM keys as well as Google ones.
         delete_secret("google_token")
         delete_secret("google_client_id")
+        cfg = load_config()
+        for provider in list(cfg.llm.providers.keys()):
+            delete_secret(_llm_key_name(provider))
         app = QApplication.instance()
         if app is not None:
             app.quit()
         return {"deleted": True}
+
+    def _stop_background(self) -> None:
+        """Stop scheduler and worker before destructive data operations."""
+        if self._scheduler is not None:
+            with contextlib.suppress(Exception):
+                self._scheduler.stop()
+        if self._worker is not None:
+            with contextlib.suppress(Exception):
+                self._worker.stop()
 
     def export_data(self, fmt: str = "json") -> dict:
         """Export tasks, reminders, events and facts as JSON or Markdown

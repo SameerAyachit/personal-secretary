@@ -74,7 +74,10 @@ D. GOOGLE — DONE (this commit)
   15. Settings Google tab — DONE (separate Disconnect and Reconnect buttons when connected)
   16. sync_calendar from scheduler — DONE (called in tick with calendar_client, rebuild_google_client on connect, last sync + error in sync status)
   17. email_send message — DONE ("Approved, sending is not enabled yet.")
-E. DATA SAFETY — items 18-20 (delete_all_data/restore safety, JSON log formatter + redaction, second-launch raise window)
+E. DATA SAFETY — DONE (this commit)
+  18. delete_all_data/restore safety — DONE (stop scheduler/worker first, close logging handlers, remove LLM + Google keys, quit; restore doesn't replace open DB)
+  19. JSON log formatter + redaction — DONE (every line is json.dumps of record dict; redacts gsk_..., AIza..., ya29..., long tokens + secret dict keys)
+  20. Second-launch raise window — DONE (connects to existing instance's QLocalSocket to raise its window)
 F. TESTS THAT WOULD HAVE CAUGHT THESE — real-wiring tests
 
 1. UI FREEZE — DONE. Root cause evidenced by tests/e2e/test_heartbeat.py: on pre-fix code the reminder/notifier path blocked the GUI thread (max gap 1.578 s > 300 ms — the "python is not responding" freeze ~1 minute after a reminder fires). Fix: `Notifier._show_notification` keeps fast Qt work (popup) on the GUI thread and pumps the blocking `desktop_sync.send()` (WinRT run_until_complete) onto a background thread (`_send_toast`). Heartbeat test fails first (1.578 s gap), passes after fix (all scenarios ≤ 300 ms). Main-thread watchdog added (plan C-27): `src/secretary/util/main_thread_watchdog.py` — background thread watches a GUI-thread QTimer heartbeat (50 ms); after a 5 s missed heartbeat it logs and calls `faulthandler.dump_traceback()`; wired into `App` (started in `main()`, stopped in `cleanup()`) and `MainWindow` (50 ms beat timer). Unit tests in tests/unit/util/test_main_thread_watchdog.py. py-spy: NOT available on this machine (noted "not available").

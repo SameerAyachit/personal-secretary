@@ -17,6 +17,7 @@ import sys
 from ctypes import wintypes
 
 from PySide6.QtCore import QMetaObject, Qt
+from PySide6.QtNetwork import QLocalSocket
 
 from secretary.agent.router import Router
 from secretary.app import create_app
@@ -56,6 +57,7 @@ logger = logging.getLogger(__name__)
 
 # Windows console control event: Ctrl+C. 0 is the value of CTRL_C_EVENT.
 CTRL_C_EVENT = 0
+_SOCKET_NAME = "SecretaryApp.SingleInstance"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,7 +150,11 @@ def main(argv: list[str] | None = None) -> int:
 
     app = create_app(argv)
     if not app.is_primary():
-        print("Secretary is already running.", file=sys.stderr)
+        # Second launch: connect to the existing instance's socket so its
+        # newConnection signal fires and raises its window, then exit.
+        socket = QLocalSocket()
+        socket.connectToServer(_SOCKET_NAME)
+        socket.waitForConnected(1000)
         return 0
 
     _install_quit_on_ctrl_c(app)
@@ -199,9 +205,13 @@ def main(argv: list[str] | None = None) -> int:
             limiter=limiter,
             submit_coro=app.worker.submit,
         )
+        controller.set_worker(app.worker)
         install_reporter(controller.error.emit)
         conn.llm = llm  # research_brief uses it; None when no LLM key is configured
         window = MainWindow(controller, watchdog=app.watchdog)
+
+        # Second-instance activation: raise this window.
+        app.on_another_instance_activated(window.show_window)
 
         # Search provider + cache + breaker.
         provider = DDGSSearchProvider()
@@ -252,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             notifier=notifier,
         )
         scheduler.start()
+        controller.set_scheduler(scheduler)
 
         window.quick_capture = quick_capture
         if args.minimized:
