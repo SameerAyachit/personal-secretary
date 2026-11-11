@@ -63,6 +63,8 @@ class SettingsView(QWidget):
         layout.addWidget(tabs)
 
         self._controller.error.connect(self._on_controller_error)
+        self._controller.models_loaded.connect(self._on_models_loaded)
+        self._controller.connection_tested.connect(self._on_connection_tested)
         self.refresh_google()
 
     # ------------------------------------------------------------------ General
@@ -122,13 +124,14 @@ class SettingsView(QWidget):
         self._ai_model = QComboBox()
         self._ai_model.setAccessibleName("Model")
         self._ai_model.setEditable(True)
-        self._ai_model.setPlaceholderText("model")
+        self._ai_model.setPlaceholderText("loading…")
         grid.addWidget(QLabel("Model"), 1, 0)
         grid.addWidget(self._ai_model, 1, 1)
-        # Models are populated lazily (on provider change or explicit request)
-        # so SettingsView construction never makes a network call (plan B9).
+        # Models are populated lazily (on provider change) via the
+        # models_loaded signal so SettingsView construction never makes a
+        # network call (plan B9). The dropdown starts disabled with a
+        # "loading…" placeholder and falls back to the configured model.
         self._ai_model.setEnabled(False)
-        self._ai_model.setPlaceholderText("loading…")
 
         self._ai_key = QLineEdit()
         self._ai_key.setAccessibleName("API key")
@@ -164,14 +167,25 @@ class SettingsView(QWidget):
         self._refresh_ai_key_status()
 
     def _refresh_ai_models(self) -> None:
-        """Populate the model dropdown from the provider's GET /models endpoint.
+        """Request the provider's models on the worker loop (plan B9).
 
-        Falls back to the configured primary_model if the endpoint is
-        unavailable. The combo stays editable so any model can be typed.
+        The dropdown starts disabled with a "loading…" placeholder; results
+        arrive via the models_loaded signal and fall back to the configured
+        model on failure.
         """
         provider = self._ai_provider.currentText()
-        models = self._controller.get_available_models(provider)
-        current = self._ai_model.currentText()
+        self._ai_model.setEnabled(False)
+        self._ai_model.blockSignals(True)
+        self._ai_model.clear()
+        self._ai_model.addItem("loading…")
+        self._ai_model.blockSignals(False)
+        # Kick off the async model listing on the worker loop.
+        self._controller.get_available_models(provider)
+
+    def _on_models_loaded(self, provider: str, models: list[str]) -> None:
+        """Populate the model dropdown when the worker loop finishes listing."""
+        if provider != self._ai_provider.currentText():
+            return  # stale result from a previous provider selection
         self._ai_model.blockSignals(True)
         self._ai_model.clear()
         if models:
@@ -179,10 +193,12 @@ class SettingsView(QWidget):
         # Ensure the configured/current model is present and selected.
         cfg = self._controller.get_llm_config()
         configured = cfg["providers"][provider]["model"] or ""
+        current = self._ai_model.currentText()
         target = current or configured or ""
         if target and target not in [self._ai_model.itemText(i) for i in range(self._ai_model.count())]:
             self._ai_model.addItem(target)
         self._ai_model.setCurrentText(target if target else self._ai_model.itemText(0))
+        self._ai_model.setEnabled(True)
         self._ai_model.blockSignals(False)
 
     def _refresh_ai_key_status(self) -> None:
@@ -199,14 +215,17 @@ class SettingsView(QWidget):
     def _on_ai_test(self) -> None:
         provider = self._ai_provider.currentText()
         prov = self._controller.get_llm_config()["providers"][provider]
-        try:
-            result = self._controller.test_llm_connection(
-                prov["base_url"], self._ai_key.text(), self._ai_model.currentText()
-            )
-        except Exception as exc:  # surface exact error, never secrets
-            self._ai_status.setText(f"Test failed: {exc}")
-            self._ai_status.setHidden(False)
-            return
+        self._ai_status.setText("Testing connection…")
+        self._ai_status.setHidden(False)
+        # Runs on the worker loop; result arrives via connection_tested signal.
+        self._controller.test_llm_connection(
+            prov["base_url"], self._ai_key.text(), self._ai_model.currentText()
+        )
+
+    def _on_connection_tested(self, provider: str, result: dict) -> None:
+        """Show the test connection result on the Google/AI tab."""
+        if provider != self._ai_provider.currentText():
+            return  # stale result from a previous provider selection
         if "error" in result:
             self._ai_status.setText(f"Test failed: {result['error']}")
         else:

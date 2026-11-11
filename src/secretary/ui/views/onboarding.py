@@ -49,6 +49,9 @@ class OnboardingWizard(QDialog):
         self._stack.setCurrentIndex(0)
         self._update_buttons()
 
+        # Test connection runs on the worker loop; result arrives via signal.
+        self._controller.connection_tested.connect(self._on_test_result)
+
     # ------------------------------------------------------------------ pages
 
     def _build_pages(self) -> None:
@@ -184,7 +187,11 @@ class OnboardingWizard(QDialog):
         if not key:
             self._test_status.setText("Please paste an API key.")
             return
-        self._controller.set_llm_provider(provider, key, base_url, model)
+        try:
+            self._controller.set_llm_provider(provider, key, base_url, model)
+        except Exception as exc:  # never raise inside a slot
+            self._test_status.setText(f"Save failed: {exc}")
+            return
         self._next_page()
 
     def _run_test(self) -> None:
@@ -196,8 +203,8 @@ class OnboardingWizard(QDialog):
             return
         self._test_btn.setEnabled(False)
         self._test_status.setText("Testing connection...")
-        result = self._controller.test_llm_connection(base_url, key, model)
-        self._on_test_result(result)
+        # Runs on the worker loop; result arrives via connection_tested signal.
+        self._controller.test_llm_connection(base_url, key, model)
 
     def _on_test_result(self, result: dict) -> None:
         self._test_btn.setEnabled(True)
@@ -219,7 +226,11 @@ class OnboardingWizard(QDialog):
 
     def _save_general(self) -> None:
         tz = self._tz.text().strip() or "Asia/Kolkata"
-        self._controller.save_general(tz, self._start_minimized.isChecked())
+        try:
+            self._controller.save_general(tz, self._start_minimized.isChecked())
+        except Exception as exc:  # never raise inside a slot
+            self._test_status.setText(f"Save failed: {exc}")
+            return
         self._next_page()
 
     def accept(self) -> None:

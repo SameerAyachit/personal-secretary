@@ -88,6 +88,8 @@ class Controller(QObject):
     job_progress = Signal(str, int, str)
     research_status = Signal(str)  # research brief progress
     research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
+    models_loaded = Signal(str, list)  # provider, models (for AI dropdown)
+    connection_tested = Signal(str, dict)  # provider, result dict (for Test connection)
     error = Signal(str, str)
 
     def __init__(
@@ -265,21 +267,6 @@ class Controller(QObject):
         safety = lim_cfg.safety_factor if lim_cfg else 0.7
         self.limiter = Limiter(rpm=max(rpm, 1), tpm=max(tpm, 1), safety=safety)
 
-    def test_llm_connection(self, base_url: str, api_key: str, model: str) -> dict:
-        """Send a tiny probe request and return the result dict.
-
-        Uses the stored key when the field is blank, and the provider's
-        base_url (not a hardcoded Groq URL) so it works for Gemini too.
-        """
-        key = api_key.strip() if api_key and api_key.strip() else get_active_llm_key()
-        if not key:
-            return {"error": "No LLM key configured. Save one in Settings > AI first."}
-        try:
-            result = asyncio.run(_probe_once(key, model, base_url=base_url))
-        except Exception as exc:
-            return {"error": str(exc)}
-        return result
-
     def get_config(self) -> dict:
         """Return current config values for the wizard to pre-fill."""
         cfg = load_config()
@@ -317,21 +304,24 @@ class Controller(QObject):
             return {"status": "placeholder", "provider": provider, "key_name": key_name}
         return {"status": "saved", "provider": provider, "key_name": key_name}
 
-    def get_available_models(self, provider: str | None = None) -> list[str]:
-        """Return the models listed by the active provider's GET /models endpoint.
+    @Slot(str)
+    def get_available_models(self, provider: str | None = None) -> None:
+        """List the provider's models on the worker loop; emit models_loaded.
 
-        Never prints or returns secrets. Returns an empty list if the provider
-        has no key or the endpoint fails (the dropdown falls back to the
-        configured primary_model).
+        Never blocks the Qt thread. Returns immediately; results arrive via
+        the models_loaded signal (provider, list[str]). Falls back to the
+        configured primary_model on failure.
         """
         cfg = load_config()
         provider = provider or cfg.llm.active
         prov = cfg.llm.providers.get(provider)
         if prov is None:
-            return []
-        key = get_secret(f"llm_api_key:{provider}")
+            self.models_loaded.emit(provider, [])
+            return
+        key = get_secret(_llm_key_name(provider))
         if not key:
-            return []
+            self.models_loaded.emit(provider, [])
+            return
         client = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model or "x")
 
         async def _list_and_close() -> list[str]:
@@ -340,10 +330,51 @@ class Controller(QObject):
             finally:
                 await client.aclose()
 
-        try:
-            return asyncio.run(_list_and_close())
-        except Exception:  # endpoint unavailable -> empty dropdown, caller falls back
-            return []
+        if self._submit_coro is None:
+            self.models_loaded.emit(provider, [])
+            return
+        future = self._submit_coro(_list_and_close())
+        future.add_done_callback(
+            lambda f: self.models_loaded.emit(
+                provider,
+                f.result() if not f.exception() else [],
+            )
+        )
+
+    @Slot(str, str, str)
+    def test_llm_connection(self, base_url: str, api_key: str, model: str) -> None:
+        """Send a tiny probe request on the worker loop; emit connection_tested.
+
+        Uses the stored key when the field is blank, and the provider's
+        base_url (not a hardcoded Groq URL) so it works for Gemini too.
+        """
+        cfg = load_config()
+        provider = cfg.llm.active
+        key = api_key.strip() if api_key and api_key.strip() else get_active_llm_key()
+        if not key:
+            self.connection_tested.emit(
+                provider,
+                {"error": "No LLM key configured. Save one in Settings > AI first."},
+            )
+            return
+
+        async def _probe() -> dict:
+            try:
+                return await _probe_once(key, model, base_url=base_url)
+            except Exception as exc:  # surface exact error, never secrets
+                return {"error": str(exc)}
+
+        if self._submit_coro is None:
+            self.connection_tested.emit(
+                provider, {"error": "Worker loop not available"}
+            )
+            return
+        future = self._submit_coro(_probe())
+        future.add_done_callback(
+            lambda f: self.connection_tested.emit(
+                provider, f.result() if not f.exception() else {"error": str(f.exception())}
+            )
+        )
 
     def set_theme(self, theme: str) -> None:
         """Persist the UI theme (system|light|dark)."""
