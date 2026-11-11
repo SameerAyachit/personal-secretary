@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import pytest
 
 import secretary.integrations.google.auth as auth_module
 from secretary.integrations.google.auth import GoogleAuth, GoogleAuthError
@@ -325,3 +326,105 @@ def test_sync_failure_recorded(respx_mock, monkeypatch):
         assert "500" in settings_repo.get(conn, "google_sync_error")
     finally:
         conn.close()
+
+
+def _oauth_and_time_window(respx_mock, monkeypatch):
+    monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
+    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
+    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
+    respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
+        return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
+    )
+
+
+def test_list_events_403_insufficient_permissions(respx_mock, monkeypatch):
+    _oauth_and_time_window(respx_mock, monkeypatch)
+    respx_mock.get(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    ).mock(
+        return_value=httpx.Response(
+            403,
+            json={
+                "error": {
+                    "code": 403,
+                    "message": "Insufficient Permission",
+                    "errors": [{"reason": "insufficientPermissions", "message": "Insufficient Permission"}],
+                }
+            },
+        )
+    )
+    auth = GoogleAuth("cid", "secret")
+    client = CalendarClient(auth)
+    with pytest.raises(GoogleCalendarError) as exc:
+        client.list_events(
+            "primary",
+            time_min="2026-11-11T00:00:00Z",
+            time_max="2026-11-18T00:00:00Z",
+        )
+    assert exc.value.status_code == 403
+    assert "insufficientPermissions" in exc.value.reason
+    assert "calendar.events" in exc.value.user_message()
+    assert "Re-connect Google" in exc.value.user_message()
+
+
+def test_list_events_403_access_not_configured(respx_mock, monkeypatch):
+    _oauth_and_time_window(respx_mock, monkeypatch)
+    respx_mock.get(
+        "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    ).mock(
+        return_value=httpx.Response(
+            403,
+            json={
+                "error": {
+                    "code": 403,
+                    "message": "Access Not Configured",
+                    "errors": [{"reason": "accessNotConfigured", "message": "Access Not Configured"}],
+                }
+            },
+        )
+    )
+    auth = GoogleAuth("cid", "secret")
+    client = CalendarClient(auth)
+    with pytest.raises(GoogleCalendarError) as exc:
+        client.list_events(
+            "primary",
+            time_min="2026-11-11T00:00:00Z",
+            time_max="2026-11-18T00:00:00Z",
+        )
+    assert exc.value.status_code == 403
+    assert "accessNotConfigured" in exc.value.reason
+    assert "Google Cloud Console" in exc.value.user_message()
+
+
+def test_sync_calendar_records_distinct_403_user_messages(respx_mock, monkeypatch):
+    for reason, needle in (("insufficientPermissions", "Re-connect Google"), ("accessNotConfigured", "Google Cloud Console")):
+        conn = _conn()
+        try:
+            _oauth_and_time_window(respx_mock, monkeypatch)
+            respx_mock.get(
+                "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+            ).mock(
+                return_value=httpx.Response(
+                    403,
+                    json={
+                        "error": {
+                            "code": 403,
+                            "message": "boom",
+                            "errors": [{"reason": reason, "message": "boom"}],
+                        }
+                    },
+                )
+            )
+            auth = GoogleAuth("cid", "secret")
+            client = CalendarClient(auth)
+            try:
+                sync_calendar(conn, client, "primary")
+            except GoogleCalendarError:
+                pass
+            else:  # pragma: no cover - defensive
+                raise AssertionError(f"expected GoogleCalendarError for {reason}")
+            assert settings_repo.get(conn, "google_sync_failed") == "1"
+            error = settings_repo.get(conn, "google_sync_error")
+            assert needle in error, error
+        finally:
+            conn.close()

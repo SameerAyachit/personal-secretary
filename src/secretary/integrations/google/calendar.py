@@ -24,7 +24,45 @@ _DEFAULT_TZ = "Asia/Kolkata"
 
 
 class GoogleCalendarError(Exception):
-    """Raised when a Calendar API call fails."""
+    """Raised when a Calendar API call fails.
+
+    Carries the HTTP status and Google's error reason/message (never tokens)
+    so the UI can show distinct, actionable messages.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        reason: str | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.reason = reason or ""
+        self._message = message
+        super().__init__(message)
+
+    @property
+    def message(self) -> str:
+        return self._message
+
+    def user_message(self) -> str:
+        """User-facing message for the Settings sync chip (no tokens)."""
+        reasons = {r.strip() for r in self.reason.split(",") if r.strip()}
+        if "accessNotConfigured" in reasons:
+            return (
+                "Google Calendar API is not enabled for this project. "
+                "Enable it in the Google Cloud Console, then re-connect Google."
+            )
+        if "insufficientPermissions" in reasons:
+            return (
+                "Calendar permission missing: the connected account cannot access "
+                "calendar.events. Re-connect Google in Settings to consent again."
+            )
+        if self.status_code is not None:
+            return f"Calendar sync failed: HTTP {self.status_code}" + (
+                f" — {self._message}" if self._message else ""
+            )
+        return f"Calendar sync failed: {self._message}"
 
 
 class GoogleCalendarSyncTokenInvalid(GoogleCalendarError):
@@ -32,11 +70,29 @@ class GoogleCalendarSyncTokenInvalid(GoogleCalendarError):
 
 
 class CalendarClient:
-    """Thin client over Google Calendar v3 ``events.list``."""
+    """Thin client over Google Calendar v3 ``events.list`` (calendarId ``primary`` only)."""
 
     def __init__(self, auth: GoogleAuth, client: httpx.Client | None = None) -> None:
         self._auth = auth
         self._client = client or httpx.Client()
+
+    @staticmethod
+    def _parse_google_error(response: httpx.Response) -> tuple[str, str]:
+        """Return (reason, message) from Google's error JSON body; never tokens."""
+        reason = ""
+        message = ""
+        try:
+            body = response.json()
+            err = body.get("error", {}) if isinstance(body, dict) else {}
+            message = str(err.get("message", ""))
+            errors = err.get("errors", [])
+            if isinstance(errors, list):
+                reason = ", ".join(
+                    str(e.get("reason", "")) for e in errors if isinstance(e, dict)
+                )
+        except Exception:  # body parsing is best-effort
+            pass
+        return reason, message
 
     def list_events(
         self,
@@ -68,7 +124,16 @@ class CalendarClient:
                 raise GoogleCalendarSyncTokenInvalid(
                     "nextSyncToken is invalid; full resync required"
                 ) from exc
-            raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
+            reason, message = self._parse_google_error(exc.response)
+            status_code = exc.response.status_code
+            detail = f"HTTP {status_code}" + (
+                f" {reason}" if reason else ""
+            ) + (f": {message}" if message else "")
+            raise GoogleCalendarError(
+                f"Calendar API call failed: {detail}",
+                status_code=status_code,
+                reason=reason,
+            ) from exc
         except httpx.HTTPError as exc:
             raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
         return response.json()
@@ -193,6 +258,10 @@ def sync_calendar(
         settings_repo.set(conn, "google_sync_failed", "0", turn_id=turn_id)
         settings_repo.set(conn, "google_sync_error", "", turn_id=turn_id)
     except GoogleCalendarSyncTokenInvalid:
+        raise
+    except GoogleCalendarError as exc:  # distinct user message for 403s etc.
+        settings_repo.set(conn, "google_sync_failed", "1", turn_id=turn_id)
+        settings_repo.set(conn, "google_sync_error", exc.user_message(), turn_id=turn_id)
         raise
     except Exception as exc:
         # Record the failure so the UI can show a "sync failed" chip.

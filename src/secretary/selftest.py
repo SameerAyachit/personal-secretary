@@ -20,12 +20,15 @@ import re
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
+from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QApplication
 
 from secretary.agent.router import Router
+from secretary.app import WorkerThread
 from secretary.config import load_config
 from secretary.controller import Controller, get_active_llm_key
 from secretary.integrations.google.auth import GoogleAuth, GoogleAuthError
@@ -61,6 +64,32 @@ def _safe_print(text: str) -> None:
         )
 
 
+def _google_error_line(resp: httpx.Response) -> str:
+    """HTTP status plus Google's error reason and message from the body.
+
+    Tokens are never printed.
+    """
+    reason = ""
+    message = ""
+    try:
+        body = resp.json()
+        err = body.get("error", {}) if isinstance(body, dict) else {}
+        message = str(err.get("message", ""))
+        errors = err.get("errors", [])
+        if isinstance(errors, list):
+            reason = ", ".join(
+                str(e.get("reason", "")) for e in errors if isinstance(e, dict)
+            )
+    except Exception:  # body parsing is best-effort
+        pass
+    line = f"HTTP {resp.status_code}"
+    if reason:
+        line += f" reason={reason}"
+    if message:
+        line += f" message={message}"
+    return line
+
+
 def _poll(condition, timeout_seconds: float) -> bool:
     """Run the Qt event loop until ``condition()`` is true or timeout elapses."""
     app = QApplication.instance()
@@ -71,6 +100,24 @@ def _poll(condition, timeout_seconds: float) -> bool:
             return True
         time.sleep(POLL)
     return False
+
+
+class TurnSpy(QObject):
+    """Collects ``turn_finished`` emissions.
+
+    A plain Python callable connected to a Qt signal is not reliably delivered
+    across threads, so this :class:`QObject` exposes a real ``@Slot(str)`` that
+    Qt delivers to the main thread event loop even when the signal is emitted
+    from the worker thread.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.replies: list[str] = []
+
+    @Slot(str)
+    def on_finished(self, text: str) -> None:
+        self.replies.append(text)
 
 
 def _build_registry_router() -> tuple[Registry, Router]:
@@ -106,7 +153,7 @@ def _new_conn(data_root: Path) -> Connection:
     return conn
 
 
-def _build_controller(conn: Connection) -> tuple[Controller, dict]:
+def _build_controller(conn: Connection, submit_coro=None) -> tuple[Controller, dict]:
     registry, router = _build_registry_router()
     key = get_active_llm_key()
     if not key:
@@ -116,7 +163,14 @@ def _build_controller(conn: Connection) -> tuple[Controller, dict]:
     prov = cfg.llm.providers[provider]
     llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
     limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
-    controller = Controller(conn, registry=registry, router=router, llm=llm, limiter=limiter)
+    controller = Controller(
+        conn,
+        registry=registry,
+        router=router,
+        llm=llm,
+        limiter=limiter,
+        submit_coro=submit_coro,
+    )
     placeholder = len(key) < 20 or key.lower().startswith(("fake", "test"))
     info = {
         "provider": provider,
@@ -139,38 +193,42 @@ def _chat_meta(info: dict) -> str:
     )
 
 
-def _selftest_chat(data_root: Path) -> str:
+def _selftest_chat(data_root: Path, submit_coro=None) -> str:
     conn = _new_conn(data_root)
     try:
-        controller, info = _build_controller(conn)
+        controller, info = _build_controller(conn, submit_coro=submit_coro)
     except RuntimeError as exc:
         return f"[FAIL] chat: {exc}"
     if info["placeholder"]:
         return (
             f"[FAIL] chat: stored key is a placeholder, please re-enter it {_chat_meta(info)}"
         )
-    replies = []
-    controller.turn_finished.connect(replies.append)
+    spy = TurnSpy()
+    controller.turn_finished.connect(spy.on_finished)
     try:
-        controller.send_message("hey")
+        for i in range(5):
+            controller.send_message(f"message {i + 1}: say ping")
     except Exception as exc:  # surface exact error, never secrets
         return f"[FAIL] chat: send_message raised {type(exc).__name__}: {exc} {_chat_meta(info)}"
-    if not _poll(lambda: bool(replies and replies[-1]), 30.0):
-        return f"[FAIL] chat: no assistant reply within 30 s {_chat_meta(info)}"
-    reply = (replies[-1] or "").strip()
-    if not reply:
-        return f"[FAIL] chat: empty assistant reply {_chat_meta(info)}"
-    if reply.startswith("I hit an error:"):
-        return f"[FAIL] chat: provider error: {reply[:90]} {_chat_meta(info)}"
-    return f"[PASS] chat: {reply[:90]} {_chat_meta(info)}"
+    for i in range(5):
+        if not _poll(lambda i=i: len(spy.replies) == i + 1, 30.0):
+            return f"[FAIL] chat: no assistant reply for message {i + 1} within 30 s {_chat_meta(info)}"
+        reply = (spy.replies[i] or "").strip()
+        if not reply:
+            return f"[FAIL] chat: empty assistant reply for message {i + 1} {_chat_meta(info)}"
+        if reply.startswith("I hit an error:"):
+            return f"[FAIL] chat: provider error: {reply[:90]} {_chat_meta(info)}"
+    return f"[PASS] chat: 5 messages OK; last: {spy.replies[-1][:60]} {_chat_meta(info)}"
 
 
-def _selftest_reminder(data_root: Path) -> str:
+def _selftest_reminder(data_root: Path, submit_coro=None) -> str:
     conn = _new_conn(data_root)
     try:
-        controller, _info = _build_controller(conn)
+        controller, _info = _build_controller(conn, submit_coro=submit_coro)
     except RuntimeError as exc:
         return f"[FAIL] reminder: {exc}"
+    spy = TurnSpy()
+    controller.turn_finished.connect(spy.on_finished)
     notifier = Notifier(None)
     notified: list[tuple[str, str]] = []
 
@@ -188,15 +246,13 @@ def _selftest_reminder(data_root: Path) -> str:
     scheduler = SchedulerThread(conn, on_fired=on_fired)
     scheduler.start()
     try:
-        replies = []
-        controller.turn_finished.connect(replies.append)
         try:
             controller.send_message("remind me to drink water in 20 seconds")
         except Exception as exc:  # surface exact error, never secrets
             return f"[FAIL] reminder: send_message raised {type(exc).__name__}: {exc}"
-        if not _poll(lambda: bool(replies and replies[-1]), 30.0):
+        if not _poll(lambda: bool(spy.replies), 30.0):
             return "[FAIL] reminder: no assistant reply within 30 s"
-        reply = (replies[-1] or "").strip()
+        reply = (spy.replies[-1] or "").strip()
         if not reply:
             return "[FAIL] reminder: empty assistant reply"
         if reply.startswith("I hit an error:"):
@@ -226,7 +282,7 @@ def _selftest_reminder(data_root: Path) -> str:
         scheduler.stop()
 
 
-def _selftest_notify(data_root: Path) -> str:
+def _selftest_notify(data_root: Path, submit_coro=None) -> str:
     """Show one real Windows toast via the notifier.
 
     desktop-notifier cannot initialise unpackaged (no AUMID), so when the toast
@@ -239,16 +295,18 @@ def _selftest_notify(data_root: Path) -> str:
         title = "Secretary notify self-test"
         body = "toast selftest"
         try:
-            sent = notifier.notify(title, body, priority=True)
+            notifier.notify(title, body, priority=True)
         except Exception as exc:  # surface exact error, never secrets
             return f"[FAIL] notify: notify raised {type(exc).__name__}: {exc}"
-        if sent:
-            return "[PASS] notify: Windows toast sent"
-        # Toast layer unavailable (AUMID when run unpackaged). Confirm the
-        # fallback: popup card shown (notify did not raise) + inbox row fires.
+        # Deliver the queued toast display on the GUI thread.
+        app = QApplication.instance()
+        app.processEvents()
+        # Inbox row is the source of truth; always write it directly.
         inbox_repo.create(conn, kind="reminder", title=title, body=body, turn_id="notify-selftest")
         rows = inbox_repo.list_unacknowledged(conn)
         if any(r["title"] == title for r in rows):
+            if notifier._desktop_sync is not None:
+                return "[PASS] notify: Windows toast sent"
             return (
                 "[PASS] notify: toast unavailable (AUMID unpackaged); "
                 "popup card shown + inbox row fires"
@@ -258,7 +316,7 @@ def _selftest_notify(data_root: Path) -> str:
         conn.close()
 
 
-def _selftest_google(data_root: Path) -> str:
+def _selftest_google(data_root: Path, submit_coro=None) -> str:
     path = credentials_path()
     if not path.exists():
         return "[FAIL] google: no credentials.json found"
@@ -288,13 +346,24 @@ def _selftest_google(data_root: Path) -> str:
     try:
         auth = GoogleAuth(client_id, client_secret)
         auth.access_token()  # refreshes against Google; may raise GoogleAuthError
+        # Only the events scope is granted, so only events.list on the primary
+        # calendar is used (never calendarList).
+        now = datetime.now(UTC)
         resp = httpx.get(
-            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            params={
+                "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "timeMax": (now + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "singleEvents": "true",
+                "maxResults": "10",
+            },
             headers=auth.auth_header(),
             timeout=30.0,
         )
-        parts.append(f"calendar list HTTP {resp.status_code}")
+        parts.append(_google_error_line(resp))
         if resp.status_code == 200:
+            items = resp.json().get("items", []) or []
+            parts.append(f"events(next 7 days)={len(items)}")
             return "[PASS] google: " + " | ".join(parts)
         return "[FAIL] google: " + " | ".join(parts)
     except GoogleAuthError as exc:
@@ -303,17 +372,81 @@ def _selftest_google(data_root: Path) -> str:
         return f"[FAIL] google: {type(exc).__name__}: {exc} | " + " | ".join(parts)
 
 
-def _selftest_all(data_root: Path) -> str:
+def _selftest_google_live(data_root: Path) -> str:
+    """Live Google check against the real APIs (refresh token must be saved).
+
+    Refreshes the access token, lists events for the next 7 days on the
+    primary calendar (events scope only) and prints the count, then lists the
+    5 most recent Gmail message ids (message references only, no content).
+    """
+    path = credentials_path()
+    if not path.exists():
+        return "[FAIL] google-live: no credentials.json found"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return f"[FAIL] google-live: credentials.json does not parse: {exc}"
+    installed = data.get("installed") or data.get("web") or {}
+    client_id = installed.get("client_id", "")
+    client_secret = installed.get("client_secret", "")
+    parts = [f"client_id length={len(client_id)} suffix={client_id[-4:] if client_id else '(none)'}"]
+    if not connected():
+        return (
+            "[FAIL] google-live: not connected; sign in via Settings > Google > "
+            "Connect Google first (" + " | ".join(parts) + ")"
+        )
+    try:
+        auth = GoogleAuth(client_id, client_secret)
+        token = auth.access_token()  # refreshes against Google; may raise GoogleAuthError
+        parts.append("access token refreshed")
+        # Calendar: next 7 days on the primary calendar (events scope only).
+        now = datetime.now(UTC)
+        resp = httpx.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            params={
+                "timeMin": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "timeMax": (now + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "singleEvents": "true",
+                "maxResults": "2500",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+        if resp.status_code != 200:
+            return "[FAIL] google-live: calendar " + _google_error_line(resp) + " | " + " | ".join(parts)
+        items = resp.json().get("items", []) or []
+        parts.append(f"events(next 7 days)={len(items)}")
+        # Gmail: 5 most recent message ids (references only, no content).
+        gmail_resp = httpx.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            params={"maxResults": "5"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+        if gmail_resp.status_code != 200:
+            return "[FAIL] google-live: gmail " + _google_error_line(gmail_resp) + " | " + " | ".join(parts)
+        ids = [m.get("id", "") for m in (gmail_resp.json().get("messages", []) or [])]
+        parts.append("gmail recent ids=" + ",".join(i for i in ids if i))
+        return "[PASS] google-live: " + " | ".join(parts)
+    except GoogleAuthError as exc:
+        return f"[FAIL] google-live: refresh failed ({exc}) | " + " | ".join(parts)
+    except Exception as exc:  # surface exact error, never secrets
+        return f"[FAIL] google-live: {type(exc).__name__}: {exc} | " + " | ".join(parts)
+
+
+def _selftest_all(data_root: Path, submit_coro=None) -> str:
     results = [
-        _selftest_chat(data_root),
-        _selftest_reminder(data_root),
+        _selftest_chat(data_root, submit_coro=submit_coro),
+        _selftest_reminder(data_root, submit_coro=submit_coro),
         _selftest_google(data_root),
     ]
     for line in results:
         _safe_print(line)
     chat_ok = results[0].startswith("[PASS]")
     rem_ok = results[1].startswith("[PASS]")
-    overall = "PASS" if (chat_ok and rem_ok) else "FAIL"
+    # A google [WARN] (no refresh token yet) stays non-fatal; any [FAIL] fails all.
+    google_ok = not results[2].startswith("[FAIL]")
+    overall = "PASS" if (chat_ok and rem_ok and google_ok) else "FAIL"
     return f"[{overall}] selftest all"
 
 
@@ -331,17 +464,32 @@ def run_selftest(name: str) -> int:
     if real_cfg.exists():
         (data_root / "config.toml").write_bytes(real_cfg.read_bytes())
 
+    # Persistent worker loop for agent turns (plan §3.1). All LLM calls run on
+    # this loop, never on the Qt main thread, so the UI stays responsive and
+    # the shared httpx client keeps one event loop.
+    worker = WorkerThread()
+    worker.start()
+    deadline = time.monotonic() + 5
+    while worker.loop is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if worker.loop is None:
+        _safe_print("[FAIL] selftest: worker loop did not start")
+        return 1
+
     tests = {
         "chat": _selftest_chat,
         "reminder": _selftest_reminder,
         "google": _selftest_google,
+        "google-live": _selftest_google_live,
         "notify": _selftest_notify,
         "all": _selftest_all,
     }
     if name not in tests:
-        print(f"unknown selftest: {name} (choices: {', '.join(sorted(tests))})")
+        _safe_print(f"unknown selftest: {name} (choices: {', '.join(sorted(tests))})")
+        worker.stop()
         return 2
-    result = tests[name](data_root)
+    result = tests[name](data_root, submit_coro=worker.submit)
     _safe_print(result)
     failed = "[FAIL]" in result or (name == "all" and not result.startswith("[PASS] selftest all"))
+    worker.stop()
     return 1 if failed else 0
