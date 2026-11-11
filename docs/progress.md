@@ -47,6 +47,20 @@ Fresh command output (this session, run with .venv python):
 4. SELFTEST HONESTY / GOOGLE — IN PROGRESS. `--selftest all` still counts only chat+reminder toward overall PASS (a [FAIL] google ends PASS/exit 0). `_selftest_google` still calls `calendarList` (HTTP 403 — outside the granted `calendar.events` scope). No `--selftest google-live` mode yet. No distinct Settings messages for mocked 403 `insufficientPermissions` vs `accessNotConfigured`.
 5. SETTINGS — DONE. `src/secretary/ui/views/settings.py`: exactly four tabs (General, AI, Google, Data); everything else lives in Diagnostics. Screenshots light/dark in docs/screenshots.
 
+## Remaining code-buildable plan work (plan §21) — one task per commit, in order
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| Gmail triage job | DONE (commit 4adbd33) | `src/secretary/scheduler/triage_job.py` (sync + classify, caps 15 msgs / 500-char body, no network in DB transaction), wired into `scheduler/ticker.py` tick + `__main__` (gmail client when Google connected); `tests/scheduler/test_triage_job.py` (9 tests); ruff ✓, pytest ✓, lint-imports ✓ |
+| Drafts and approvals UI with code-built summaries | DONE (verified) | `ApprovalsView` (code-built `row["summary"]`, recipient highlighting with "(new)"), `Controller.list_pending_actions`/approve/reject, send with payload re-verification and draft-change refusal (src/secretary/controller/__init__.py ~463-515) |
+| Research brief UI and citation check | DONE (commit 4f3e394) | `ResearchView` + rail item, `Controller.run_research_brief` on the worker loop with `research_brief_finished` signal; `tests/ui/test_research_view.py` (3 tests); ruff ✓, pytest ✓, lint-imports ✓ |
+| Tray overflow hint | NOT STARTED | C-4 deferred (docs/BUILD_REPORT.md) |
+| Timezone change banner | NOT STARTED | C-23 deferred |
+| Two-priority limiter | NOT STARTED | C-53 deferred |
+| Code-assisted planner | NOT STARTED | `plan_day` tool exists (free slots); no planner UI yet (C-54 deferred) |
+| Source-bound claim checker | NOT STARTED | claim removal exists inside `research_brief` tool; no standalone feature/exposure |
+| README final pass | NOT STARTED | — |
+
 ## New work this session (2026-11-10)
 - Reminders from chat (plan §8.5) — DONE: added `reminder_create` (class B), `reminder_list` (class A), `reminder_snooze` (class B), `reminder_cancel` (class B) in src/secretary/tools/reminders.py; each resolves time in code via timeparse, uses idempotency keys, and reminder_create dedupes within 60s and echoes the resolved fire time. Registered in the router and the system prompt tool list. Tasks quick-add states whether it creates a task or a reminder. E2E: tests/e2e/test_reminders_chat.py (real composition root, FakeLLM, injected clock, fake notifier). Committed dbec2f3.
 - 0xC0000409 teardown crash — DONE (mitigated): faulthandler shows a native Qt access violation (<no Python frame>) when the shared QApplication is destroyed at interpreter teardown (~30-40% of full runs). Added conftest.py session fixture that quits the shared QApplication after all tests. Root cause: native PySide6 Windows teardown race; residual is environmental. Committed 45153f3.

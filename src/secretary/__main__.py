@@ -35,6 +35,7 @@ from secretary.tools import reminders as reminders_tools
 from secretary.tools import research as research_tools
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
+from secretary.ui.tray import TrayIcon
 
 from .config import load_config
 from .controller import Controller, get_active_llm_key
@@ -190,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         conn.search_provider = search_service
 
         # Notifier + tray for reminders.
-        notifier = Notifier(window.tray_icon())
+        tray = TrayIcon(window, controller)
+        notifier = Notifier(tray.tray_icon())
 
         # Global hotkey for quick capture (Ctrl+Alt+Space).
         quick_capture = QuickCapture(controller)

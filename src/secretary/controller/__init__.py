@@ -50,6 +50,8 @@ from secretary.tools.research import research_brief_tool
 
 logger = logging.getLogger(__name__)
 
+MAX_INBOX_PREVIEW = 5
+
 
 def get_active_llm_key() -> str | None:
     """Return the API key for the configured LLM provider from Credential Manager.
@@ -110,6 +112,16 @@ class Controller(QObject):
         """Return unacknowledged inbox items (for the UI to display)."""
         try:
             return inbox_repo.list_unacknowledged(self.conn)
+        except Exception:
+            return []
+
+    def list_inbox_preview(self, limit: int | None = None) -> list[dict]:
+        """Return unacknowledged inbox items, newest first (for the tray
+        overflow hint). When ``limit`` is None all items are returned so the
+        caller can compute the overflow hint accurately."""
+        try:
+            rows = inbox_repo.list_unacknowledged(self.conn)
+            return rows if limit is None else rows[:limit]
         except Exception:
             return []
 

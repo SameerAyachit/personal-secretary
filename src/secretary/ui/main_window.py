@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -11,12 +11,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QStackedWidget,
-    QSystemTrayIcon,
     QWidget,
 )
 
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme, resolve_theme
+from secretary.ui.tray import TrayIcon
 from secretary.ui.views import approvals, chat, events, inbox, research, settings, tasks, today
 from secretary.util.main_thread_watchdog import MainThreadWatchdog
 
@@ -72,8 +72,9 @@ class MainWindow(QMainWindow):
         # Content area.
         self._stack = QStackedWidget()
 
-        self._tray = QSystemTrayIcon(self)
-        self._tray.setToolTip("Secretary")
+        # Tray icon with Open/Quit menu and an inbox overflow hint (plan C-4).
+        self._tray = TrayIcon(self, controller)
+        self._tray.item_activated.connect(self.show_inbox)
 
         self._views = {
             "Today": today.TodayView(controller),
@@ -90,7 +91,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self._stack)
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
-        self._controller.inbox_changed.connect(lambda: None)
+        self._controller.inbox_changed.connect(self.refresh_tray)
 
     def _on_system_theme_changed(self, scheme: Qt.ColorScheme) -> None:
         """Re-apply the theme when Windows changes its color scheme ("system")."""
@@ -99,7 +100,21 @@ class MainWindow(QMainWindow):
             apply_theme(QApplication.instance(), resolve_theme(stored))
 
     def tray_icon(self):
-        return self._tray
+        return self._tray.tray_icon()
+
+    def refresh_tray(self) -> None:
+        """Refresh the tray menu/badge from the current inbox state."""
+        self._tray.refresh()
+
+    @Slot()
+    def show_inbox(self) -> None:
+        """Show the Inbox view (chosen from a tray menu item)."""
+        for i in range(self._rail.count()):
+            if self._rail.item(i).data(Qt.UserRole) == "Inbox":
+                self._rail.setCurrentRow(i)
+                break
+        self._stack.setCurrentWidget(self._views["Inbox"])
+        self.show_window()
 
     def _on_rail_changed(self, item: QListWidgetItem) -> None:
         if item is None:
