@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import logging
 import signal
 import sys
@@ -19,6 +20,8 @@ from PySide6.QtCore import QMetaObject, Qt
 
 from secretary.agent.router import Router
 from secretary.app import create_app
+from secretary.integrations.google.auth import GoogleAuth
+from secretary.integrations.google.gmail import GmailClient
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
@@ -40,7 +43,7 @@ from .errors import install_excepthooks, install_reporter
 from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
-from .paths import config_path, db_path
+from .paths import config_path, credentials_path, db_path
 from .scheduler.ticker import SchedulerThread
 from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
@@ -201,7 +204,21 @@ def main(argv: list[str] | None = None) -> int:
                 notifier.notify(entry["title"], entry["body"], priority=True)
             controller.inbox_changed.emit()
 
-        scheduler = SchedulerThread(conn, on_fired=on_fired)
+        # Gmail triage job (plan §13.4): real Google credentials plus an LLM
+        # classifier are human-gated, so the job is a no-op until both are
+        # configured. The classifier stays unconfigured here (use
+        # secretary.tools.email.configure_triage to inject one).
+        gmail_client = None
+        if controller.get_google_connected() and credentials_path().exists():
+            try:
+                creds = json.loads(credentials_path().read_text(encoding="utf-8"))
+                installed = creds.get("installed") or creds.get("web") or {}
+                gmail_client = GmailClient(
+                    GoogleAuth(installed.get("client_id", ""), installed.get("client_secret", ""))
+                )
+            except Exception as exc:  # never let triage break startup
+                logger.warning("gmail triage job unavailable: %s", exc)
+        scheduler = SchedulerThread(conn, on_fired=on_fired, gmail_client=gmail_client)
         scheduler.start()
 
         window.quick_capture = quick_capture

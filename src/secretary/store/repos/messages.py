@@ -70,6 +70,16 @@ def list_unread(con: sqlite3.Connection, limit: int = 50) -> list[dict]:
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def get_by_google_id(con: sqlite3.Connection, google_message_id: str) -> dict | None:
+    """Return the locally stored message for a Gmail message id, if any."""
+    cur = con.execute(
+        "SELECT * FROM email_messages WHERE google_message_id=? AND deleted_at IS NULL",
+        (google_message_id,),
+    )
+    row = cur.fetchone()
+    return row_to_dict(cur, row) if row else None
+
+
 def mark_read(con: sqlite3.Connection, message_id: int) -> bool:
     cur = con.execute(
         "UPDATE email_messages SET is_read=1, updated_at=? WHERE id=? AND is_read=0",

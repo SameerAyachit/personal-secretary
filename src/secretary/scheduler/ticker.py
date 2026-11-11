@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QThread
 
+from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
@@ -127,8 +128,14 @@ def _sweeper(conn: sqlite3.Connection) -> None:
     )
 
 
-def tick(conn: Connection, on_fired=None) -> None:
-    """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper."""
+def tick(
+    conn: Connection,
+    on_fired=None,
+    gmail_client=None,
+    classify=None,
+) -> None:
+    """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper,
+    and the Gmail triage job (plan §13.4)."""
     logger.info("scheduler tick: started")
     try:
         due = conn.write(_fire_due)
@@ -146,21 +153,46 @@ def tick(conn: Connection, on_fired=None) -> None:
             conn.write(step)
         except Exception:
             logger.exception("scheduler step %s failed", step.__name__)
+    # Gmail triage job (network + DB writes; every failure logged, never stops
+    # the tick; no-op when neither dependency is configured).
+    try:
+        summary = run_triage_job(conn, gmail_client=gmail_client, classify=classify)
+        if summary["synced"] or summary["triaged"]:
+            logger.info(
+                "scheduler triage job: synced=%d triaged=%d",
+                summary["synced"],
+                summary["triaged"],
+            )
+    except Exception:
+        logger.exception("scheduler triage job failed")
     logger.info("scheduler tick: finished")
 
 
 class SchedulerThread(QThread):
     """Owns the scheduler tick loop on its own thread (plan §10.1)."""
 
-    def __init__(self, conn: Connection, on_fired=None) -> None:
+    def __init__(
+        self,
+        conn: Connection,
+        on_fired=None,
+        gmail_client=None,
+        classify=None,
+    ) -> None:
         super().__init__()
         self._conn = conn
         self._on_fired = on_fired
+        self._gmail_client = gmail_client
+        self._classify = classify
         self._running = True
 
     def run(self) -> None:  # type: ignore[override]
         while self._running:
-            tick(self._conn, self._on_fired)
+            tick(
+                self._conn,
+                self._on_fired,
+                gmail_client=self._gmail_client,
+                classify=self._classify,
+            )
             # Sleep in small increments so stop() is responsive and shutdown is
             # deterministic (no 30 s wait stuck in msleep).
             slept = 0
