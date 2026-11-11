@@ -143,7 +143,11 @@ async def run_turn(
             return "The turn timed out. Please try again."
 
         est = _estimate_tokens(messages, tool_schemas)
-        await limiter.acquire(est, on_wait=ctx.get("ui_wait"))
+        await limiter.acquire(
+            est,
+            priority=ctx.get("priority", "background"),
+            on_wait=ctx.get("ui_wait"),
+        )
         resp = await llm.chat(
             messages=messages,
             tools=tool_schemas,

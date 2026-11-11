@@ -86,3 +86,34 @@ async def test_acquire_waits_then_refills(monkeypatch):
     await lim.acquire(550)  # waits ~50s to refill 500 tokens, then deducts
     assert lim.tok_tokens == 0
     assert len(sleeps) == 10  # 10 x 5s sleeps = 50s
+
+
+@pytest.mark.asyncio
+async def test_interactive_served_before_background_when_both_wait(monkeypatch):
+    # With an empty bucket, an interactive call and a background call both
+    # wait; when tokens refill, the interactive call is served first
+    # (concern C-53).
+    now = [0.0]
+    lim = Limiter(rpm=60, tpm=6000, safety=1.0, clock=lambda: now[0])
+    lim.req_tokens = 0
+    lim.tok_tokens = 0
+    order = []
+
+    orig_sleep = asyncio.sleep
+
+    async def fake_sleep(d):
+        now[0] += d  # time passes while sleeping
+        await orig_sleep(0)  # yield control so the other call can run
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    async def interactive():
+        await lim.acquire(100, priority="interactive")
+        order.append("interactive")
+
+    async def background():
+        await lim.acquire(10, priority="background")
+        order.append("background")
+
+    await asyncio.gather(interactive(), background())
+    assert order == ["interactive", "background"]

@@ -367,7 +367,7 @@ class Controller(QObject):
             self.error.emit("task_create", str(exc))
 
     @Slot(str)
-    def send_message(self, text: str) -> None:
+    def send_message(self, text: str, priority: str = "interactive") -> None:
         """Handle a chat message: run the agent loop when an LLM key is configured,
         otherwise echo a placeholder."""
         self.turn_started.emit()
@@ -398,7 +398,12 @@ class Controller(QObject):
             return
         coro = run_turn(
             text,
-            {"turn_id": f"turn-{self._turn_id}", "now": "", "tz": "Asia/Kolkata"},
+            {
+                "turn_id": f"turn-{self._turn_id}",
+                "now": "",
+                "tz": "Asia/Kolkata",
+                "priority": priority,
+            },
             self.llm,
             self.limiter,
             self.router,
