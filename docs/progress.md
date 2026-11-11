@@ -58,7 +58,7 @@ Fresh command output (this session, run with .venv python):
 | Timezone change banner | DONE (commit 9408925) | scheduler tick compares system time zone signature against the stored value; on change creates a system inbox item + toast notification once per change and stores the new signature. tests/scheduler/test_timezone_banner.py (3 tests); ruff ✓, pytest ✓, lint-imports ✓ |
 | Two-priority limiter | DONE (this commit) | llm/limiter.py: two priority classes (interactive/background) share one token bucket; background yields while an interactive call waits. run_turn passes priority via turn context; Controller.send_message accepts priority. tests/unit/llm/test_limiter.py (2 new tests); ruff OK, pytest OK, lint-imports OK |
 | Code-assisted planner | DONE (this session) | `PlannerView` + rail item, `Controller.get_free_slots`/`create_task_at` wrapping `plan_day` (code computes 9:00-17:00 free slots); `tests/ui/test_planner_view.py` (3 tests); ruff OK, pytest OK, lint-imports OK |
-| Source-bound claim checker | NOT STARTED | claim removal exists inside `research_brief` tool; no standalone feature/exposure |
+| Source-bound claim checker | DONE (this session) | `check_claims(brief, sources, llm)` standalone function + `check_claims` class-A tool (registers in research.py); `_check_citations` now delegates to it; unsupported claims removed, not softened; `tests/unit/tools/test_research.py` (3 new claim-check tests); ruff OK, pytest OK, lint-imports OK |
 | README final pass | NOT STARTED | — |
 
 ## New work this session (2026-11-10)

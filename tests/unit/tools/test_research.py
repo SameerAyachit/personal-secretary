@@ -14,7 +14,7 @@ from secretary.llm.base import LLMResponse
 from secretary.llm.fake import FakeLLM
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
-from secretary.tools.research import research_brief_tool
+from secretary.tools.research import check_claims, research_brief_tool
 
 
 def _conn():
@@ -171,3 +171,39 @@ async def test_research_brief_partial_when_nothing_fetches(monkeypatch):
         assert result["sources"] == []
     finally:
         conn.close()
+
+
+class _ClaimLLM:
+    def __init__(self, keep) -> None:
+        self._keep = keep
+        self.calls = 0
+
+    async def chat(self, *, messages, tools, max_tokens, temperature, purpose, **kwargs):
+        self.calls += 1
+        return LLMResponse(text='{"keep": ' + str(self._keep) + "}", usage={}, headers={}, model="fake")
+
+    async def list_models(self) -> list[str]:
+        return ["fake"]
+
+
+@pytest.mark.asyncio
+async def test_check_claims_removes_unsupported():
+    llm = _ClaimLLM([0])
+    cleaned = await check_claims(
+        "Supported fact [1](https://example.com/a). Unsupported fabrication.",
+        [{"url": "https://example.com/a"}],
+        llm,
+    )
+    assert cleaned == "Supported fact [1](https://example.com/a)."
+    assert "Unsupported fabrication" not in cleaned
+
+
+@pytest.mark.asyncio
+async def test_check_claims_empty_sources_returns_empty():
+    cleaned = await check_claims("Any claim at all.", [], _ClaimLLM([0]))
+    assert cleaned == ""
+
+
+@pytest.mark.asyncio
+async def test_check_claims_no_sentences():
+    assert await check_claims("", [{"url": "https://example.com/a"}], _ClaimLLM([0])) == ""

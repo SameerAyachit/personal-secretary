@@ -46,6 +46,52 @@ def _parse_json(text: str | None, default: Any) -> Any:
         return default
 
 
+def _split_sentences(brief: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", brief) if s.strip()]
+
+
+async def check_claims(brief: str, sources: list[dict], llm) -> str:
+    """Return ``brief`` with sentences that cannot be matched to a source removed.
+
+    Source-bound claim check (concern C-55): unsupported claims are removed,
+    not softened. Uses the LLM with no write tools.
+    """
+    sentences = _split_sentences(brief)
+    if not sentences:
+        return brief
+    if not sources:
+        return ""
+    resp = await llm.chat(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Check which sentences of the brief below are supported by "
+                    "the sources. Return JSON only: {\"keep\": [0, 2, ...]} with "
+                    "the zero-based indices of supported sentences, in order."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Brief sentences:\n"
+                    + "\n".join(f"{i}: {s}" for i, s in enumerate(sentences))
+                    + "\n\nSources:\n"
+                    + "\n".join(f"{i+1}: {s.get('url', '')}" for i, s in enumerate(sources))
+                ),
+            },
+        ],
+        tools=None,
+        max_tokens=400,
+        temperature=0.2,
+        purpose="claim_check",
+    )
+    data = _parse_json(resp.text or "", {"keep": list(range(len(sentences)))})
+    keep = data.get("keep", list(range(len(sentences)))) if isinstance(data, dict) else list(range(len(sentences)))
+    keep = [i for i in keep if isinstance(i, int) and 0 <= i < len(sentences)]
+    return " ".join(sentences[i] for i in keep)
+
+
 class ResearchBrief:
     """Stateful brief pipeline with an LLM call budget."""
 
@@ -169,37 +215,7 @@ class ResearchBrief:
         return str(data.get("brief", "")) if isinstance(data, dict) else ""
 
     async def _check_citations(self, brief: str, sourced: list[dict]) -> str:
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", brief) if s.strip()]
-        if not sentences:
-            return brief
-        data = _parse_json(
-            await self._chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Check which sentences of the brief below are supported by the sources. "
-                            "Return JSON only: {\"keep\": [0, 2, ...]} with the zero-based indices of "
-                            "supported sentences, in order."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "Brief sentences:\n"
-                            + "\n".join(f"{i}: {s}" for i, s in enumerate(sentences))
-                            + "\n\nSources:\n"
-                            + "\n".join(f"{i+1}: {s['url']}" for i, s in enumerate(sourced))
-                        ),
-                    },
-                ],
-                max_tokens=400,
-            ),
-            {"keep": list(range(len(sentences)))},
-        )
-        keep = data.get("keep", list(range(len(sentences)))) if isinstance(data, dict) else list(range(len(sentences)))
-        keep = [i for i in keep if isinstance(i, int) and 0 <= i < len(sentences)]
-        return " ".join(sentences[i] for i in keep)
+        return await check_claims(brief, sourced, self._llm)
 
     async def run(self, topic: str, depth: str = "standard") -> dict:
         queries = await self._plan_queries(topic)
@@ -253,6 +269,24 @@ async def research_brief_tool(conn: Any, turn_id: str, args: dict) -> dict:
     return await pipeline.run(parsed.topic, parsed.depth)
 
 
+class CheckClaimsArgs(BaseModel):
+    text: str = Field(..., description="Brief text whose claims should be checked.")
+    sources: list[dict] = Field(
+        default_factory=list,
+        description="Sources with at least a 'url' field each.",
+    )
+
+
+async def check_claims_tool(conn: Any, turn_id: str, args: dict) -> dict:
+    """Standalone source-bound claim check (class A): remove unsupported claims."""
+    parsed = CheckClaimsArgs(**args)
+    llm = getattr(conn, "llm", None)
+    if llm is None:
+        return {"error": "LLM not configured; claim check requires an LLM provider."}
+    cleaned = await check_claims(parsed.text, parsed.sources or [], llm)
+    return {"text": cleaned}
+
+
 def register(registry) -> None:
     registry.register(
         ToolSpec(
@@ -262,5 +296,15 @@ def register(registry) -> None:
             description="Research a topic and write a sourced brief.",
             args_model=ResearchBriefArgs,
             fn=research_brief_tool,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="check_claims",
+            group="research",
+            safety_class=SafetyClass.A,
+            description="Remove brief claims that cannot be matched to a source (source-bound claim check).",
+            args_model=CheckClaimsArgs,
+            fn=check_claims_tool,
         )
     )
