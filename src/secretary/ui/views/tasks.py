@@ -44,11 +44,11 @@ class TasksView(QWidget):
             "Task or reminder (e.g. \"buy groceries\" / \"remind me to call at 5pm\")"
         )
         self._input.returnPressed.connect(self._on_add)
-        add_btn = QPushButton("Add")
-        add_btn.setObjectName("Accent")
-        add_btn.clicked.connect(self._on_add)
+        self._add_btn = QPushButton("Add")
+        self._add_btn.setObjectName("Accent")
+        self._add_btn.clicked.connect(self._on_add)
         add_row.addWidget(self._input)
-        add_row.addWidget(add_btn)
+        add_row.addWidget(self._add_btn)
         layout.addLayout(add_row)
 
         self._status = QLabel("")

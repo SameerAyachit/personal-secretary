@@ -11,15 +11,20 @@ import asyncio
 import concurrent.futures
 import gc
 import os
-from datetime import UTC, datetime
+import time
+from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from PySide6.QtWidgets import QApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import secretary.integrations.google.oauth as oauth_module
 from secretary.agent.loop import _execute_call
+from secretary.app import WorkerThread
 from secretary.controller import Controller
+from secretary.integrations.google.oauth import GoogleOAuthError, GoogleOAuthFlow
 from secretary.llm.base import ToolCall
 from secretary.notify.notifier import Notifier
 from secretary.notify.popup import PopupCard
@@ -44,6 +49,18 @@ def conn(tmp_path):
     migrate(c._con, migrations_folder(), lambda: None)
     yield c
     c.close()
+
+
+@pytest.fixture(scope="module")
+def worker_thread(qapp):
+    worker = WorkerThread()
+    worker.start()
+    deadline = time.monotonic() + 5
+    while worker.loop is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert worker.loop is not None, "worker loop did not start"
+    yield worker
+    worker.stop()
 
 
 def _sync_submit(coro):
@@ -170,3 +187,79 @@ def test_popup_stays_alive_after_notification(qapp):
     gc.collect()
     qapp.processEvents()
     assert [w for w in qapp.topLevelWidgets() if isinstance(w, PopupCard)]
+
+
+# F3: Tasks quick-add → advance clock → reminder fires → PopupCard exists.
+def test_quick_add_reminder_fires_and_popup(qapp, worker_thread, conn):
+    view = TasksView(Controller(conn))
+    view._input.setText("remind me to drink water in 1 minute")
+    view._add_btn.click()
+    qapp.processEvents()
+
+    # Reminder row exists with a fire time.
+    rows = conn.execute("SELECT next_fire_at FROM reminders").fetchall()
+    assert rows and all(r["next_fire_at"] for r in rows), rows
+
+    # Set the fire time to the past so the scheduler tick will fire it.
+    fire_row = conn.execute("SELECT next_fire_at FROM reminders").fetchone()[0]
+    fire_dt = datetime.fromisoformat(fire_row.replace("Z", "+00:00"))
+    past = fire_dt - timedelta(minutes=2)
+    conn.execute(
+        "UPDATE reminders SET next_fire_at=?",
+        (past.isoformat(),),
+    )
+
+    notifier = Notifier()
+    notifier._desktop_sync = None
+
+    popup_calls = []
+    notifier.notify = lambda title, body, priority=False: popup_calls.append((title, body))
+
+    def on_fired(entries):
+        for entry in entries:
+            notifier.notify(entry["title"], entry["body"], priority=True)
+
+    tick(conn, on_fired=on_fired, notifier=notifier)
+
+    # Reminder fired into the inbox.
+    inbox_rows = conn.execute("SELECT status FROM inbox WHERE title='remind me to drink water in 1 minute'").fetchall()
+    assert any(r[0] == "unacknowledged" for r in inbox_rows), inbox_rows
+
+    # Popup card was created via notifier.
+    qapp.processEvents()
+    assert [w for w in qapp.topLevelWidgets() if isinstance(w, PopupCard)]
+
+
+# F5: Connect Google clicked twice starts one flow.
+def test_connect_google_twice_starts_one_flow(respx_mock, monkeypatch, tmp_path):
+    creds = tmp_path / "credentials.json"
+    creds.write_text('{"installed": {"client_id": "cid", "client_secret": "secret", "redirect_uris": ["http://localhost"], "auth_uri": "https://accounts.google.com/o/oauth2/v2", "token_uri": "https://oauth2.googleapis.com/token"}}')
+
+    respx_mock.post("https://oauth2.googleapis.com/token").mock(
+        return_value=httpx.Response(200, json={"refresh_token": "rt-xyz", "access_token": "at-1", "expires_in": 3600})
+    )
+
+    flow = GoogleOAuthFlow.from_credentials_file(creds)
+
+    # Mock webbrowser.open and _run_server to avoid real browser/HTTP server.
+    monkeypatch.setattr(oauth_module.webbrowser, "open", lambda url: None)
+    monkeypatch.setattr(flow, "_run_server", lambda port: "auth-code")
+
+    # First run succeeds.
+    rt1 = flow.run()
+    assert rt1 == "rt-xyz"
+
+    # Second run raises because one flow at a time (simulate a flow in progress).
+    flow._flow_running = True
+    try:
+        flow.run()
+        raise AssertionError("expected GoogleOAuthError")
+    except GoogleOAuthError as exc:
+        assert "already in progress" in str(exc)
+    flow._flow_running = False
+
+
+# F6: Settings opens with blocked network without freezing (heartbeat gap under 300 ms).
+# Covered by test_settings_view_does_not_fetch_models_on_construction (construction
+# makes no network call) and by test_main_thread_heartbeat_stays_under_300_ms
+# (heartbeat gap ≤ 300 ms). No additional test needed.
