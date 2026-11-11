@@ -17,6 +17,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QApplication
@@ -32,6 +33,7 @@ from secretary.integrations.google.oauth import (
     disconnect,
     is_invalid_grant,
 )
+from secretary.llm.limiter import Limiter
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.llm.probe import _probe_once
 from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
@@ -46,6 +48,7 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
+from secretary.timeparse.when import resolve_when
 from secretary.tools.planning import plan_day
 from secretary.tools.research import research_brief_tool
 
@@ -63,7 +66,12 @@ def get_active_llm_key() -> str | None:
     """
     cfg = load_config()
     provider = cfg.llm.active
-    return get_secret(f"llm_api_key:{provider}")
+    return get_secret(_llm_key_name(provider))
+
+
+def _llm_key_name(provider: str) -> str:
+    """Credential key name for a provider: ``llm_api_key:{provider}``."""
+    return f"llm_api_key:{provider}"
 
 
 class Controller(QObject):
@@ -126,6 +134,62 @@ class Controller(QObject):
         except Exception:
             return []
 
+    # ------------------------------------------------------------------ Chat history
+
+    def resolve_when_text(self, text: str, tz_name: str | None = None) -> str | None:
+        """Resolve a user time expression to a UTC ISO string, or None if unparseable.
+
+        Runs in code (never by the LLM). Used by the UI quick-add path.
+        """
+        cfg = load_config()
+        tz_name = tz_name or cfg.app.timezone or "UTC"
+        zone = ZoneInfo(tz_name)
+        now_local = datetime.now(UTC).astimezone(zone)
+        try:
+            fire_local = resolve_when(text, now_local, tz_name)
+            return fire_local.astimezone(UTC).isoformat()
+        except Exception:
+            return None
+
+    def get_recent_chat_messages(self, limit: int = 8) -> list[dict]:
+        """Return recent user/assistant chat messages for turn context history.
+
+        Ordered oldest-first, suitable for passing as ``ctx["history"]`` to the
+        agent loop so the model can follow up on previous exchanges.
+        """
+        try:
+            rows = self.conn.execute(
+                "SELECT role, content FROM messages WHERE role IN ('user','assistant') "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+        except Exception:
+            return []
+
+    def _store_chat_message(self, role: str, content: str, turn_id: str | None = None) -> None:
+        """Persist one chat message to the conversations/messages table."""
+        try:
+            conv = self.conn.execute(
+                "SELECT id FROM conversations ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            if conv is None:
+                self.conn.execute(
+                    "INSERT INTO conversations(title, created_at) VALUES(?,?)",
+                    ("Chat", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
+                )
+                conv_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            else:
+                conv_id = conv[0]
+            self.conn.execute(
+                "INSERT INTO messages(conversation_id, role, content, turn_id, created_at) "
+                "VALUES(?,?,?,?,?)",
+                (conv_id, role, content, turn_id, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
+            )
+        except Exception:
+            # History is best-effort; a failure must never block a chat turn.
+            pass
+
     def list_pending_actions(self) -> list[dict]:
         """Return waiting class-C pending actions (for the Approvals view).
 
@@ -160,19 +224,58 @@ class Controller(QObject):
     def set_llm_provider(
         self, provider: str, key: str, base_url: str, model: str
     ) -> None:
-        """Save an LLM API key to Credential Manager and persist provider config."""
-        set_secret("secretary", f"llm_api_key:{provider}", key)
+        """Save an LLM API key to Credential Manager and persist provider config.
+
+        Never overwrites a stored key with a blank field: if ``key`` is empty,
+        the previously saved key is left in place so the user can't accidentally
+        erase it by leaving the field blank.
+        """
         cfg = load_config()
         cfg.llm.active = provider
         cfg.llm.providers[provider].base_url = base_url
         cfg.llm.providers[provider].primary_model = model
-        cfg.llm.providers[provider].key_name = f"llm_api_key:{provider}"
+        cfg.llm.providers[provider].key_name = _llm_key_name(provider)
         save_config(cfg)
+        if key and key.strip():
+            set_secret(_llm_key_name(provider), key.strip())
+        self.rebuild_llm()
+
+    def rebuild_llm(self) -> None:
+        """Rebuild the LLM client and limiter from the current config.
+
+        Called when the provider, key, or model changes so the active turn
+        loop uses the new settings without a restart (plan A5). Limiter values
+        come from config, not code constants.
+        """
+        self.llm = None
+        self.limiter = None
+        key = get_active_llm_key()
+        cfg = load_config()
+        provider = cfg.llm.active
+        prov = cfg.llm.providers.get(provider)
+        if prov is None:
+            return
+        model = prov.primary_model or ""
+        if not key or not model or model.lower().startswith(("fake", "test")):
+            return
+        self.llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=model)
+        lim_cfg = cfg.llm.limits.get(provider + "_primary")
+        rpm = lim_cfg.rpm if lim_cfg else 60
+        tpm = lim_cfg.tpm if lim_cfg else 6000
+        safety = lim_cfg.safety_factor if lim_cfg else 0.7
+        self.limiter = Limiter(rpm=max(rpm, 1), tpm=max(tpm, 1), safety=safety)
 
     def test_llm_connection(self, base_url: str, api_key: str, model: str) -> dict:
-        """Send a tiny probe request and return the result dict."""
+        """Send a tiny probe request and return the result dict.
+
+        Uses the stored key when the field is blank, and the provider's
+        base_url (not a hardcoded Groq URL) so it works for Gemini too.
+        """
+        key = api_key.strip() if api_key and api_key.strip() else get_active_llm_key()
+        if not key:
+            return {"error": "No LLM key configured. Save one in Settings > AI first."}
         try:
-            result = asyncio.run(_probe_once(api_key, model))
+            result = asyncio.run(_probe_once(key, model, base_url=base_url))
         except Exception as exc:
             return {"error": str(exc)}
         return result
@@ -390,6 +493,8 @@ class Controller(QObject):
                 "No model selected. Open Settings > AI and pick one."
             )
             return
+        self._turn_id += 1
+        turn_id = f"turn-{self._turn_id}"
         self.turn_status.emit("Thinking...")
         logger.info("chat turn %s: send_message user_text=%r", self._turn_id, text)
         if self._submit_coro is None:
@@ -397,13 +502,21 @@ class Controller(QObject):
                 "I hit an error: LLM worker loop is not available."
             )
             return
+        cfg = load_config()
+        tz_name = cfg.app.timezone or "UTC"
+        zone = ZoneInfo(tz_name)
+        now_local = datetime.now(UTC).astimezone(zone)
+        history = self.get_recent_chat_messages(limit=cfg.llm.history_messages)
+        self._store_chat_message("user", text, turn_id)
         coro = run_turn(
             text,
             {
-                "turn_id": f"turn-{self._turn_id}",
-                "now": "",
-                "tz": "Asia/Kolkata",
+                "turn_id": turn_id,
+                "now": now_local.isoformat(),
+                "tz": tz_name,
+                "today_iso": now_local.date().isoformat(),
                 "priority": priority,
+                "history": history,
             },
             self.llm,
             self.limiter,
@@ -426,6 +539,7 @@ class Controller(QObject):
             logger.exception("chat turn %s: run_turn raised", self._turn_id)
             self.turn_finished.emit(f"I hit an error: {exc}")
             return
+        self._store_chat_message("assistant", result or "", f"turn-{self._turn_id}")
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
     @Slot(str)
@@ -502,24 +616,56 @@ class Controller(QObject):
 
     @Slot(int, str)
     def snooze_inbox(self, inbox_id: int, snooze_text: str) -> None:
-        inbox_repo.update(self.conn, inbox_id, status="snoozed", snoozed_until=snooze_text)
+        cfg = load_config()
+        tz_name = cfg.app.timezone or "UTC"
+        zone = ZoneInfo(tz_name)
+        now_local = datetime.now(UTC).astimezone(zone)
+        try:
+            fire_local = resolve_when(snooze_text, now_local, tz_name)
+        except Exception:
+            # Can't parse the snooze text: store it verbatim so the UI shows
+            # what really happened instead of silently succeeding.
+            inbox_repo.update(self.conn, inbox_id, status="snoozed", snoozed_until=snooze_text)
+            self.inbox_changed.emit()
+            self.turn_status.emit(f"Snooze not understood: '{snooze_text}'")
+            return
+        snoozed_until = fire_local.astimezone(UTC).isoformat()
+        inbox_repo.update(self.conn, inbox_id, status="snoozed", snoozed_until=snoozed_until)
         self.inbox_changed.emit()
-        self.turn_status.emit(f"Snoozed: {snooze_text}")
+        self.turn_status.emit(
+            f"Snoozed until {fire_local.strftime('%a %d %b, %I:%M %p %Z')}"
+        )
 
     @Slot(str, str)
     def create_reminder_manual(self, title: str, when_text: str) -> None:
+        cfg = load_config()
+        tz_name = cfg.app.timezone or "UTC"
+        zone = ZoneInfo(tz_name)
+        now_local = datetime.now(UTC).astimezone(zone)
         self._turn_id += 1
         turn_id = f"manual-{self._turn_id}"
         try:
+            fire_utc = None
+            if when_text and when_text.strip():
+                fire_local = resolve_when(when_text, now_local, tz_name)
+                fire_utc = fire_local.astimezone(UTC).isoformat()
+            else:
+                # No time could be resolved: don't create a reminder that can
+                # never fire. Tell the UI what really happened.
+                self.turn_status.emit(
+                    f"Couldn't parse '{when_text}' — please include a time "
+                    "(e.g. 'in 1 minute', 'tomorrow at 9am')."
+                )
+                return
             reminders_repo.create(
                 self.conn,
                 task_id=None,
                 title=title,
                 body="",
                 kind="once",
-                tz="Asia/Kolkata",
+                tz=tz_name,
                 rule_json=None,
-                next_fire_at=None,  # resolved by the scheduler in Phase 2
+                next_fire_at=fire_utc,
                 turn_id=turn_id,
             )
             self.tasks_changed.emit()

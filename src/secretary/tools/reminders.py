@@ -10,6 +10,7 @@ from the LLM.
 from __future__ import annotations
 
 import re
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -121,19 +122,49 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
             return {"error": f"could not parse recurrence '{parsed.recurrence_text}': {exc}"}
 
     key = idempotency_key(turn_id, "reminder_create", parsed.model_dump())
-    reminder_id = reminders_repo.create(
-        conn,
-        task_id=None,
-        title=parsed.title,
-        body="",
-        kind=kind,
-        tz=tz,
-        rule_json=rule_json,
-        next_fire_at=fire_utc.isoformat(),
-        priority=parsed.priority,
-        idempotency_key=key,
-        turn_id=turn_id,
-    )
+    # If a reminder with this idempotency key already exists (any status),
+    # return its info instead of risking a UNIQUE constraint violation.
+    existing = reminders_repo.get_by_idempotency_key(conn, key)
+    if existing is not None:
+        return {
+            "reminder_id": existing["id"],
+            "title": existing["title"],
+            "fire_at_local": _fire_local_iso(
+                datetime.fromisoformat(existing["next_fire_at"]).replace(tzinfo=UTC), tz
+            ),
+            "kind": existing["kind"],
+            "idempotency_key": existing.get("idempotency_key"),
+            "note": "A reminder with this title and time already exists.",
+        }
+    try:
+        reminder_id = reminders_repo.create(
+            conn,
+            task_id=None,
+            title=parsed.title,
+            body="",
+            kind=kind,
+            tz=tz,
+            rule_json=rule_json,
+            next_fire_at=fire_utc.isoformat(),
+            priority=parsed.priority,
+            idempotency_key=key,
+            turn_id=turn_id,
+        )
+    except sqlite3.IntegrityError:
+        # Race: another process created it between our check and insert.
+        existing = reminders_repo.get_by_idempotency_key(conn, key)
+        if existing is not None:
+            return {
+                "reminder_id": existing["id"],
+                "title": existing["title"],
+                "fire_at_local": _fire_local_iso(
+                    datetime.fromisoformat(existing["next_fire_at"]).replace(tzinfo=UTC), tz
+                ),
+                "kind": existing["kind"],
+                "idempotency_key": existing.get("idempotency_key"),
+                "note": "A reminder with this title and time already exists.",
+            }
+        raise
     return {
         "reminder_id": reminder_id,
         "title": parsed.title,

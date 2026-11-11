@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from secretary.agent.normalize_response import normalize_response
+from secretary.config import load_config
 from secretary.llm.base import ToolCall
 from secretary.llm.limiter import Limiter
 from secretary.llm.tokens import count_tokens
@@ -107,9 +108,15 @@ async def _execute_call(call: ToolCall, registry: Registry, conn, turn_id: str) 
 
     if spec.fn is None:
         return {"error": f"tool {call.name} not implemented"}
-    if asyncio.iscoroutinefunction(spec.fn):
-        return await spec.fn(conn, turn_id, args)
-    return spec.fn(conn, turn_id, args)
+    try:
+        if asyncio.iscoroutinefunction(spec.fn):
+            return await spec.fn(conn, turn_id, args)
+        return spec.fn(conn, turn_id, args)
+    except Exception as exc:
+        # A failing tool must come back to the LLM as an error result, never
+        # abort the whole turn (concern C-19).
+        logger.exception("tool %s raised during turn %s", call.name, turn_id)
+        return {"error": f"tool {call.name} failed: {exc}"}
 
 
 async def run_turn(
@@ -148,10 +155,13 @@ async def run_turn(
             priority=ctx.get("priority", "background"),
             on_wait=ctx.get("ui_wait"),
         )
+        cfg = load_config()
+        # Allow enough output for reasoning models; fall back to 400 tokens.
+        max_tokens = getattr(cfg.llm, "max_output_tokens", None) or 400
         resp = await llm.chat(
             messages=messages,
             tools=tool_schemas,
-            max_tokens=400,
+            max_tokens=max_tokens,
             temperature=0.1,
             purpose="tool",
         )
@@ -164,6 +174,9 @@ async def run_turn(
         logger.info("chat turn %s: LLM response tools=%d", turn_id,
                     len(resp.tool_calls))
         if not resp.tool_calls:
+            if resp.finish_reason == "length":
+                return ("I ran out of output room before finishing my answer. "
+                        "Try asking a shorter question, or I can continue in parts.")
             return resp.text or "I'm not sure how to help with that."
 
         # Dedupe identical calls within this turn.

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from weakref import WeakSet
 
 from PySide6.QtCore import QObject, Qt, Signal
 
@@ -53,6 +54,9 @@ class Notifier(QObject):
         # Queued connection: display happens on the GUI thread regardless of
         # which thread calls :meth:`notify`.
         self.show_notification.connect(self._show_notification, Qt.QueuedConnection)
+        # Keep popup cards alive until they are closed so they are not
+        # garbage-collected as soon as _show_popup returns (plan C-6).
+        self._popups: WeakSet[PopupCard] = WeakSet()
 
     def notify(self, title: str, body: str, priority: bool = False) -> bool:
         """Request a notification.
@@ -94,6 +98,10 @@ class Notifier(QObject):
     def _show_popup(self, title: str, body: str) -> None:
         popup = PopupCard(title, body)
         popup.show_popup()
+        # Keep a reference so the card is not GC'd when this method returns.
+        self._popups.add(popup)
+        popup.done.connect(lambda: self._popups.discard(popup))
+        popup.destroyed.connect(lambda: self._popups.discard(popup))
 
     def set_tray(self, tray_icon) -> None:
         self._tray = tray_icon

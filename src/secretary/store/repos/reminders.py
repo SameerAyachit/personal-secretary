@@ -112,3 +112,13 @@ def rule(con: sqlite3.Connection, reminder_id: int) -> dict | None:
     if not row or row[0] is None:
         return None
     return json.loads(row[0])
+
+
+def get_by_idempotency_key(con: sqlite3.Connection, key: str) -> dict | None:
+    """Return a reminder by idempotency key, regardless of status."""
+    cur = con.execute(
+        "SELECT * FROM reminders WHERE idempotency_key=? AND deleted_at IS NULL",
+        (key,),
+    )
+    row = cur.fetchone()
+    return row_to_dict(cur, row) if row else None

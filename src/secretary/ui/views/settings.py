@@ -125,7 +125,10 @@ class SettingsView(QWidget):
         self._ai_model.setPlaceholderText("model")
         grid.addWidget(QLabel("Model"), 1, 0)
         grid.addWidget(self._ai_model, 1, 1)
-        self._refresh_ai_models()
+        # Models are populated lazily (on provider change or explicit request)
+        # so SettingsView construction never makes a network call (plan B9).
+        self._ai_model.setEnabled(False)
+        self._ai_model.setPlaceholderText("loading…")
 
         self._ai_key = QLineEdit()
         self._ai_key.setAccessibleName("API key")

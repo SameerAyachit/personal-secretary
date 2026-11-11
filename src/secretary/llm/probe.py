@@ -30,8 +30,8 @@ def _read_key() -> str | None:
     )
 
 
-async def _probe_once(key: str, model: str) -> dict:
-    client = OpenAICompatClient(base_url=BASE_URL, api_key=key, model=model)
+async def _probe_once(key: str, model: str, base_url: str = BASE_URL) -> dict:
+    client = OpenAICompatClient(base_url=base_url, api_key=key, model=model)
     try:
         models = await client.list_models()
         resp = await client.chat(

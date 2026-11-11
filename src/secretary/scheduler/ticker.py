@@ -96,19 +96,34 @@ def _fire_due(conn: sqlite3.Connection) -> list[dict]:
                 {"inbox_id": inbox_id, "reminder_id": rem["id"], "title": rem["title"], "body": rem["body"]}
             )
         except sqlite3.IntegrityError:
-            # A run already exists for this (reminder, scheduled_for) — skip duplicate.
+            # A run already exists for this (reminder, scheduled_for) — release
+            # the 'firing' claim so the reminder is not stuck in 'firing'.
+            conn.execute(
+                "UPDATE reminders SET status='scheduled' WHERE id=? AND status='firing'",
+                (rem["id"],),
+            )
             continue
     return created
 
 
-def _repeat_alerts(conn: sqlite3.Connection) -> None:
-    """Unacknowledged for >= 10 minutes and repeat_sent=0 -> one repeat toast."""
+def _repeat_alerts(conn: sqlite3.Connection) -> list[dict]:
+    """Unacknowledged for >= 10 minutes and repeat_sent=0 -> one repeat toast.
+
+    Returns the items that need a repeat notification so the caller can toast
+    them. Each is marked repeat_sent=1 so it only repeats once.
+    """
     cutoff = _utc_iso(now_utc() - timedelta(minutes=REPEAT_ALERT_MINUTES))
+    rows = conn.execute(
+        "SELECT id, title, body FROM inbox WHERE kind='reminder' AND status='unacknowledged' "
+        "AND repeat_sent=0 AND created_at <= ?",
+        (cutoff,),
+    ).fetchall()
     conn.execute(
         "UPDATE inbox SET repeat_sent=1 "
         "WHERE kind='reminder' AND status='unacknowledged' AND repeat_sent=0 AND created_at <= ?",
         (cutoff,),
     )
+    return [{"id": r[0], "title": r[1], "body": r[2]} for r in rows]
 
 
 def _snooze_expiry(conn: sqlite3.Connection) -> None:
@@ -187,11 +202,19 @@ def tick(
             on_fired(due)
         except Exception:
             logger.exception("scheduler notify failed")
-    for step in (_repeat_alerts, _snooze_expiry, _sweeper):
+    for step in (_snooze_expiry, _sweeper):
         try:
             conn.write(step)
         except Exception:
             logger.exception("scheduler step %s failed", step.__name__)
+    # Repeat alerts: items unacknowledged >= 10 minutes get one repeat toast.
+    try:
+        repeats = conn.write(_repeat_alerts)
+        for entry in repeats or []:
+            if notifier is not None:
+                notifier.notify(entry["title"], entry["body"], priority=True)
+    except Exception:
+        logger.exception("scheduler repeat alerts failed")
     # Gmail triage job (network + DB writes; every failure logged, never stops
     # the tick; no-op when neither dependency is configured).
     try:

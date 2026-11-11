@@ -30,16 +30,42 @@ P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approva
 - `python -m secretary --selftest all` : runs the REAL composition root headless against the REAL LLM/keyring/scheduler/notifier. `[PASS] chat` (model=openai/gpt-oss-120b), `[PASS] reminder` (confirmation mentions resolved time, fires into inbox + notifier invoked), `[FAIL] google` (calendarList HTTP 403 — credentials grant calendar.events only, scope/config issue not a code defect; does not block `all`). Overall `[PASS] selftest all` (exit 0).
 - Full `pytest -q` : all tests pass (exit 0); the process intermittently aborts (0xC0000409) at interpreter teardown due to a native PySide6 Windows teardown race (faulthandler: shiboken/Qt, no Python frame). Mitigated via conftest teardown; residual is environmental.
 
-## CURRENT PRIORITY — status vs code + fresh output, 2026-11-11
+## CURRENT PRIORITY — code-review regressions + remaining plan work, 2026-11-11
 
 Fresh command output (this session, run with .venv python):
-- `git status --short` / `git log --oneline -3`: last commits 1abd94a (ui-freeze), 48e1933 (event-loop), a94988c (selftest/google); remaining uncommitted edits are pre-existing screenshot/eval_results files from the interrupted session (left untouched).
+- `git status --short` : only `tests/e2e/test_regressions_from_review.py` (untracked, added by reviewer)
+- `git log --oneline -3` : last commits 2f189e4 (README), e28719c (claim checker), b59177e (planner)
+- `pytest tests/e2e/test_regressions_from_review.py` : 10 FAILED (all 10 review bugs reproduce)
 - `ruff check .` : All checks passed
 - `lint-imports` : 7 kept, 0 broken (exit 0)
-- `pytest -q` : 271 passed (exit 0)
-- `python -m secretary --selftest all` : [FAIL] chat (placeholder key, environmental), [FAIL] reminder (provider 401), [PASS] google (HTTP 200, events(next 7 days)=0 — real refresh token works), [FAIL] selftest all, exit non-zero ✓
-- `python -m secretary --selftest notify` : [PASS] notify: Windows toast sent, exit 0
-- py-spy: NOT available on this machine (noted "not available")
+- `pytest -q` : 297 passed (exit 0)
+
+Review bugs (tests/e2e/test_regressions_from_review.py) — ALL FAILING, must fix:
+1. test_each_chat_message_gets_a_unique_turn_id — turn id never increments (BUG 1)
+2. test_same_reminder_requested_twice_does_not_crash — IntegrityError on re-create done reminder (BUG 1)
+3. test_tool_exception_is_reported_not_raised — _execute_call lets tool exceptions abort the turn (BUG 2)
+4. test_set_llm_provider_saves_the_key — set_secret called with 3 args (BUG 3)
+5. test_blank_key_field_does_not_erase_the_saved_key — blank key overwrites saved key (BUG 3)
+6. test_follow_up_message_receives_previous_exchange — ctx["history"] never supplied (BUG 4)
+7. test_settings_view_does_not_fetch_models_on_construction — network call on Qt thread at construction (BUG 5)
+8. test_quick_add_reminder_has_a_fire_time — "remind me..." creates reminder with no fire time (BUG 6)
+9. test_snooze_stores_a_real_future_timestamp_and_survives_a_tick — snooze stores raw text as timestamp (BUG 7)
+10. test_popup_stays_alive_after_notification — PopupCard is local var, GC'd immediately (BUG 8)
+
+Remaining code-buildable plan work (A–F):
+A. CHAT CORRECTNESS — DONE (this commit)
+  1. Unique turn id per message — DONE (Controller._turn_id incremented per message)
+  2. _execute_call catches tool exceptions — DONE (returns {"error": ...} to model)
+  3. Chat memory — DONE (ctx["history"] from conversations/messages table)
+  4. Current local time/date, configured timezone — DONE (ctx uses cfg.app.timezone)
+  5. Rebuild LLM client/limiter — DONE (Controller.rebuild_llm(), called from set_llm_provider)
+  6. max_tokens/finish_reason — DONE (config-driven max_tokens, "length" message)
+  7. build_registry_and_router() — DONE (in __main__.py, email tools routed, web_search registered)
+B. SETTINGS, KEYS, FREEZES — items 8-10 (incl. Test connection on worker loop, onboarding wizard)
+C. REMINDERS AND NOTIFICATIONS — items 11-13 (incl. repeat alert, _fire_due IntegrityError rollback, tz while app runs)
+D. GOOGLE — items 14-17 (OAuth one-flow-at-a-time, Google tab buttons, sync_calendar from scheduler, email_send message)
+E. DATA SAFETY — items 18-20 (delete_all_data/restore safety, JSON log formatter + redaction, second-launch raise window)
+F. TESTS THAT WOULD HAVE CAUGHT THESE — real-wiring tests
 
 1. UI FREEZE — DONE. Root cause evidenced by tests/e2e/test_heartbeat.py: on pre-fix code the reminder/notifier path blocked the GUI thread (max gap 1.578 s > 300 ms — the "python is not responding" freeze ~1 minute after a reminder fires). Fix: `Notifier._show_notification` keeps fast Qt work (popup) on the GUI thread and pumps the blocking `desktop_sync.send()` (WinRT run_until_complete) onto a background thread (`_send_toast`). Heartbeat test fails first (1.578 s gap), passes after fix (all scenarios ≤ 300 ms). Main-thread watchdog added (plan C-27): `src/secretary/util/main_thread_watchdog.py` — background thread watches a GUI-thread QTimer heartbeat (50 ms); after a 5 s missed heartbeat it logs and calls `faulthandler.dump_traceback()`; wired into `App` (started in `main()`, stopped in `cleanup()`) and `MainWindow` (50 ms beat timer). Unit tests in tests/unit/util/test_main_thread_watchdog.py. py-spy: NOT available on this machine (noted "not available").
 2. EVENT LOOP — DONE. One persistent worker-loop (plan §3.1): `WorkerThread` (app.py) owns the asyncio loop; `Controller.send_message` submits via `run_coroutine_threadsafe` and delivers results by the `turn_finished` signal; `OpenAICompatClient` creates its httpx client lazily on the worker loop (`_ensure_client`) and `aclose()` resets it. `__main__.py` passes `app.worker.submit` and starts the worker; selftest starts/stops its own worker. `tests/e2e/test_chat_turns_loop.py` (10 consecutive mocked turns through the real controller) passes on the fix. Honest note: the reported `RuntimeError: Event loop is closed` did NOT reproduce against httpx 0.28.1/httpcore 1.0.9 (lazy connection pool, no loop binding; respx's MockTransport is not loop-bound) — even with the old `asyncio.run`-per-turn code all 10 turns succeeded, including against a real local HTTP server. `--selftest chat` sends 5 in a row and returns [FAIL]/exit 1 if any raise (mechanism verified: placeholder key → [FAIL] placeholder, exit 1; no real LLM key installed on this machine so a live PASS can't be demonstrated here). `--selftest notify`: [PASS] toast sent / exit 0.
