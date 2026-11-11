@@ -8,9 +8,15 @@ the scheduler tick fires the reminder through a fake notifier into the inbox.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from PySide6.QtCore import QObject, Slot
+from PySide6.QtWidgets import QApplication
+
 from secretary.agent.router import Router
+from secretary.app import WorkerThread
 from secretary.controller import Controller
 from secretary.llm.base import LLMResponse, ToolCall
 from secretary.llm.fake import FakeLLM
@@ -38,6 +44,23 @@ class _FakeNotifier:
         self.calls.append((title, body, priority))
 
 
+@pytest.fixture(scope="module")
+def qapp():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(scope="module")
+def worker_thread(qapp):
+    worker = WorkerThread()
+    worker.start()
+    deadline = time.monotonic() + 5
+    while worker.loop is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert worker.loop is not None, "worker loop did not start"
+    yield worker
+    worker.stop()
+
+
 def _conn(tmp_path) -> Connection:
     db = tmp_path / "rem.db"
     conn = Connection(db)
@@ -45,7 +68,7 @@ def _conn(tmp_path) -> Connection:
     return conn
 
 
-def _build_controller(conn, llm) -> Controller:
+def _build_controller(conn, llm, submit_coro) -> Controller:
     registry = tools_registry.Registry()
     tasks_tools.register(registry)
     reminders_tools.register(registry)
@@ -60,10 +83,32 @@ def _build_controller(conn, llm) -> Controller:
         router=router,
         llm=llm,
         limiter=Limiter(rpm=60, tpm=6000, safety=0.7),
+        submit_coro=submit_coro,
     )
 
 
-def test_reminder_from_chat_fires_into_inbox(monkeypatch, tmp_path):
+class TurnSpy(QObject):
+    def __init__(self) -> None:
+        super().__init__()
+        self.replies: list[str] = []
+
+    @Slot(str)
+    def on_finished(self, text: str) -> None:
+        self.replies.append(text)
+
+
+def _wait_for_reply(controller, text, app, timeout=30.0):
+    spy = TurnSpy()
+    controller.turn_finished.connect(spy.on_finished)
+    controller.send_message(text)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not spy.replies:
+        app.processEvents()
+        time.sleep(0.01)
+    return spy.replies
+
+
+def test_reminder_from_chat_fires_into_inbox(monkeypatch, tmp_path, worker_thread):
     set_secret("llm_api_key:groq", "fake-key")
 
     # Freeze the clock so "in 1 minute" resolves deterministically.
@@ -95,15 +140,13 @@ def test_reminder_from_chat_fires_into_inbox(monkeypatch, tmp_path):
         ),
     ])
 
+    app = QApplication.instance()
     conn = _conn(tmp_path)
-    controller = _build_controller(conn, llm)
+    controller = _build_controller(conn, llm, worker_thread.submit)
 
-    finished = []
-    controller.turn_finished.connect(finished.append)
+    replies = _wait_for_reply(controller, "remind me to drink water in 1 minute", app)
 
-    controller.send_message("remind me to drink water in 1 minute")
-
-    assert any(fire_local_str in f for f in finished), finished
+    assert any(fire_local_str in r for r in replies), replies
 
     # The reminder row exists, scheduled at the code-resolved fire time.
     rows = reminders_repo.list_all(conn, status="scheduled")

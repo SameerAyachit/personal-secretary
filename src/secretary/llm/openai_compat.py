@@ -4,8 +4,13 @@ Uses ``httpx`` async client. POSTs to ``{base_url}/chat/completions`` and
 normalises the response into :class:`~secretary.llm.base.LLMResponse`.
 Rate-limit headers (``x-ratelimit-*``, ``retry-after``) are surfaced so the
 limiter can reconcile (plan §7.4).
-"""
 
+The :class:`httpx.AsyncClient` is created lazily on the running event loop in
+:meth:`_ensure_client`, so all HTTP calls happen on the same asyncio loop that
+the agent worker owns (plan §3.1). This keeps the shared connection pool bound
+to one loop and avoids ``SQLite objects created in a thread`` / event-loop
+mismatch errors when turns are submitted from the Qt thread.
+"""
 from __future__ import annotations
 
 import json
@@ -35,14 +40,23 @@ class OpenAICompatClient(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=timeout_seconds,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-        )
+        self.timeout_seconds = timeout_seconds
+        # Created lazily on the running (worker) loop in _ensure_client so the
+        # shared httpx connection pool stays bound to the worker event loop
+        # (plan §3.1). All chat()/list_models() calls run on that loop.
+        self._client: httpx.AsyncClient | None = None
+
+    async def _ensure_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout_seconds,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        return self._client
 
     async def chat(
         self,
@@ -67,7 +81,8 @@ class OpenAICompatClient(LLMClient):
 
         start = time.monotonic()
         try:
-            resp = await self._client.post(_CHAT_PATH, json=body)
+            client = await self._ensure_client()
+            resp = await client.post(_CHAT_PATH, json=body)
         except httpx.RequestError as exc:
             raise ProviderUnavailable(f"provider request failed: {exc}") from exc
 
@@ -79,12 +94,13 @@ class OpenAICompatClient(LLMClient):
             )
 
         data = resp.json()
-        latency_ms = (time.monotonic() - start) * 1000
+        latency_ms = time.monotonic() - start
         return self._normalise(data, latency_ms, dict(resp.headers))
 
     async def list_models(self) -> list[str]:
         try:
-            resp = await self._client.get(_MODELS_PATH)
+            client = await self._ensure_client()
+            resp = await client.get(_MODELS_PATH)
         except httpx.RequestError as exc:
             raise ProviderUnavailable(f"list_models failed: {exc}") from exc
         if resp.status_code >= 400:
@@ -95,7 +111,9 @@ class OpenAICompatClient(LLMClient):
         return [item.get("id", "") for item in data.get("data", []) if item.get("id")]
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     def _normalise(self, data: dict, latency_ms: float, headers: dict) -> LLMResponse:
         choices = data.get("choices", []) or []

@@ -83,6 +83,7 @@ class Controller(QObject):
         router=None,
         llm=None,
         limiter=None,
+        submit_coro=None,
     ) -> None:
         super().__init__()
         self.conn = conn
@@ -91,6 +92,10 @@ class Controller(QObject):
         self.llm = llm
         self.limiter = limiter
         self._turn_id = 0
+        # Coroutine submit callable (worker thread loop). Agent turns run on the
+        # persistent worker loop (plan §3.1), never on the Qt main thread, so the
+        # UI stays responsive and the shared httpx client keeps one event loop.
+        self._submit_coro = submit_coro
     def list_tasks(self) -> list[dict]:
         """Return open tasks (for the UI to display)."""
         try:
@@ -371,23 +376,35 @@ class Controller(QObject):
             return
         self.turn_status.emit("Thinking...")
         logger.info("chat turn %s: send_message user_text=%r", self._turn_id, text)
-        try:
-            result = asyncio.run(
-                run_turn(
-                    text,
-                    {"turn_id": f"turn-{self._turn_id}", "now": "", "tz": "Asia/Kolkata"},
-                    self.llm,
-                    self.limiter,
-                    self.router,
-                    self.registry,
-                    self.conn,
-                )
+        if self._submit_coro is None:
+            self.turn_finished.emit(
+                "I hit an error: LLM worker loop is not available."
             )
+            return
+        coro = run_turn(
+            text,
+            {"turn_id": f"turn-{self._turn_id}", "now": "", "tz": "Asia/Kolkata"},
+            self.llm,
+            self.limiter,
+            self.router,
+            self.registry,
+            self.conn,
+        )
+        future = self._submit_coro(coro)
+        future.add_done_callback(self._on_turn_done)
+
+    def _on_turn_done(self, future: asyncio.Future) -> None:
+        """Deliver a completed turn result back to the UI via a Qt signal.
+
+        Runs on the worker thread; turn_finished is delivered to GUI receivers
+        (main thread) queued by Qt, so the UI never blocks while a turn runs.
+        """
+        try:
+            result = future.result()
         except Exception as exc:
             logger.exception("chat turn %s: run_turn raised", self._turn_id)
             self.turn_finished.emit(f"I hit an error: {exc}")
             return
-        logger.info("chat turn %s: finished", self._turn_id)
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
 
