@@ -46,6 +46,7 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
+from secretary.tools.research import research_brief_tool
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ class Controller(QObject):
     approvals_changed = Signal()
     google_connected = Signal()
     job_progress = Signal(str, int, str)
+    research_status = Signal(str)  # research brief progress
+    research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
     error = Signal(str, str)
 
     def __init__(
@@ -407,6 +410,37 @@ class Controller(QObject):
             return
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
+    @Slot(str)
+    def run_research_brief(self, topic: str) -> None:
+        """Research a topic on the worker loop; the result comes back through
+        ``research_brief_finished`` as a dict {brief, sources, ...}."""
+        topic = (topic or "").strip()
+        if not topic:
+            self.research_brief_finished.emit({"brief": "", "sources": [], "error": "Enter a topic to research."})
+            return
+        if self._submit_coro is None:
+            self.research_brief_finished.emit(
+                {"brief": "", "sources": [], "error": "Research worker is not available."}
+            )
+            return
+        self.turn_status.emit("Researching...")
+        self.research_status.emit("Researching...")
+        turn_id = f"research-{self._turn_id}"
+        self._turn_id += 1
+        coro = research_brief_tool(self.conn, turn_id, {"topic": topic, "depth": "standard"})
+        future = self._submit_coro(coro)
+        future.add_done_callback(self._on_research_done)
+
+    def _on_research_done(self, future: asyncio.Future) -> None:
+        """Deliver a completed research brief back to the UI."""
+        self.research_status.emit("")
+        try:
+            result = future.result()
+        except Exception as exc:  # surface exact error, never secrets
+            logger.exception("research brief failed")
+            self.research_brief_finished.emit({"brief": "", "sources": [], "error": f"Research failed: {exc}"})
+            return
+        self.research_brief_finished.emit(result or {"brief": "", "sources": []})
 
     @Slot(str)
     def undo(self, token: str) -> None:

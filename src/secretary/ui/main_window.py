@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from secretary.controller import Controller
 from secretary.ui.theme import apply_theme, resolve_theme
-from secretary.ui.views import approvals, chat, events, inbox, settings, tasks, today
+from secretary.ui.views import approvals, chat, events, inbox, research, settings, tasks, today
 from secretary.util.main_thread_watchdog import MainThreadWatchdog
 
 
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         self._rail = QListWidget()
         self._rail.setFixedWidth(200)
         self._rail.setFrameStyle(0)  # no frame
-        for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Approvals", "Settings"):
+        for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Approvals", "Research", "Settings"):
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, label)
             self._rail.addItem(item)
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
             "Calendar": events.EventsView(controller),
             "Inbox": inbox.InboxView(controller),
             "Approvals": approvals.ApprovalsView(controller),
+            "Research": research.ResearchView(controller),
             "Settings": settings.SettingsView(controller),
         }
         for view in self._views.values():
