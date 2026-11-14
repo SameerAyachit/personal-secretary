@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from secretary.config import default_timezone
 from secretary.store.db import Connection
 from secretary.store.repos import reminders as reminders_repo
 from secretary.timeparse.recurrence import (
@@ -26,7 +27,6 @@ from secretary.timeparse.when import resolve_when
 from secretary.tools.idempotency import idempotency_key
 from secretary.tools.registry import SafetyClass, ToolSpec
 
-_DEFAULT_TZ = "Asia/Kolkata"
 _DEDUPE_WINDOW_SECONDS = 60
 
 
@@ -42,7 +42,7 @@ class ReminderCreateArgs(BaseModel):
         None, description="Recurrence rule, e.g. 'every weekday at 8:30'"
     )
     priority: int = Field(0, description="Priority (0 normal, 1 high)")
-    tz: str = Field(_DEFAULT_TZ, description="Time zone for the reminder")
+    tz: str = Field(default_factory=default_timezone, description="Time zone for the reminder")
 
 
 class ReminderListArgs(BaseModel):
@@ -253,7 +253,7 @@ def reminder_snooze(conn: Connection, turn_id: str, args: dict) -> dict:
         return {"error": f"reminder {reminder_id} could not be snoozed"}
     return {
         "reminder_id": reminder_id,
-        "snoozed_until_local": next_fire.astimezone(ZoneInfo(_DEFAULT_TZ)).strftime(
+        "snoozed_until_local": next_fire.astimezone(ZoneInfo(default_timezone())).strftime(
             "%a %d %b, %I:%M %p"
         ),
     }

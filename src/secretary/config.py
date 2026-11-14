@@ -216,6 +216,11 @@ def load_config(path: Path | None = None) -> Config:
     return Config.model_validate(merged)
 
 
+def default_timezone() -> str:
+    """The user's configured IANA timezone (Settings > General), else UTC."""
+    return load_config().app.timezone or "UTC"
+
+
 def save_config(config: Config, path: Path | None = None) -> None:
     """Persist config to ``config.toml`` (used by the wizard / Test connection)."""
     cfg_path = path or config_path()

@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from secretary.controller import Controller
 
 
-def _today_iso(tz_name: str = "Asia/Kolkata") -> str:
+def _today_iso(tz_name: str) -> str:
     return datetime.now(UTC).astimezone(ZoneInfo(tz_name)).date().isoformat()
 
 
@@ -36,7 +36,7 @@ class PlannerView(QWidget):
     def __init__(self, controller: Controller) -> None:
         super().__init__()
         self._controller = controller
-        self._tz = "Asia/Kolkata"
+        self._tz = controller.get_config().get("timezone") or "UTC"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QApplication
 from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
 from secretary.autostart import set_enabled as _autostart_set_enabled
-from secretary.config import load_config, save_config
+from secretary.config import default_timezone, load_config, save_config
 from secretary.integrations.google.clients import build_clients
 from secretary.integrations.google.oauth import (
     GoogleOAuthError,
@@ -605,7 +605,7 @@ class Controller(QObject):
             return
         self.research_brief_finished.emit(result or {"brief": "", "sources": []})
 
-    def create_task_at(self, title: str, start_at_iso: str, tz: str = "Asia/Kolkata") -> None:
+    def create_task_at(self, title: str, start_at_iso: str, tz: str | None = None) -> None:
         """Create a task scheduled at a given local time (planner slot)."""
         self._turn_id += 1
         turn_id = f"manual-{self._turn_id}"
@@ -615,7 +615,7 @@ class Controller(QObject):
                 title=title,
                 notes="",
                 due_at=start_at_iso,
-                due_tz=tz,
+                due_tz=tz or default_timezone(),
                 source="user",
                 turn_id=turn_id,
             )
@@ -624,13 +624,13 @@ class Controller(QObject):
         except Exception as exc:
             self.error.emit("task_create", str(exc))
 
-    def get_free_slots(self, date_iso: str, tz: str = "Asia/Kolkata", min_duration_minutes: int = 30) -> dict:
+    def get_free_slots(self, date_iso: str, tz: str | None = None, min_duration_minutes: int = 30) -> dict:
         """Code-assisted planner: compute free slots in a day (9:00-17:00 local)
         around existing calendar events. Returns {date, tz, free_slots}."""
         return plan_day(
             self.conn,
             "planner",
-            {"date_text": date_iso, "tz": tz, "min_duration_minutes": min_duration_minutes},
+            {"date_text": date_iso, "tz": tz or default_timezone(), "min_duration_minutes": min_duration_minutes},
         )
 
     @Slot(int)

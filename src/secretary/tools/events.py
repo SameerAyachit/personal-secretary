@@ -15,13 +15,12 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from secretary.config import default_timezone
 from secretary.integrations.google.oauth import connected as google_connected
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.timeparse.when import resolve_date, resolve_when
 from secretary.tools.registry import SafetyClass, ToolSpec
-
-_DEFAULT_TZ = "Asia/Kolkata"
 
 
 def _duration_minutes(duration_text: str) -> int:
@@ -43,7 +42,7 @@ class EventCreateArgs(BaseModel):
     when_text: str = Field(..., description="Start time (or date for all-day events) in the user's words")
     duration_text: str = Field("1 hour", description="Duration, e.g. '30 minutes' or '1 hour'")
     location: str | None = Field(None, description="Optional location")
-    tz: str = Field(_DEFAULT_TZ, description="Time zone for the event")
+    tz: str = Field(default_factory=default_timezone, description="Time zone for the event")
     all_day: bool = Field(False, description="All-day event: when_text is a date and the event occupies the whole day")
 
 

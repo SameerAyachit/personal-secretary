@@ -12,19 +12,19 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from secretary.config import default_timezone
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.timeparse.when import resolve_date
 from secretary.tools.registry import SafetyClass, ToolSpec
 
-_DEFAULT_TZ = "Asia/Kolkata"
 _WORK_START_HOUR = 9
 _WORK_END_HOUR = 17
 
 
 class PlanDayArgs(BaseModel):
     date_text: str | None = Field(None, description="Date, e.g. 'tomorrow' or '2026-11-09'")
-    tz: str = Field(_DEFAULT_TZ, description="Time zone for the day")
+    tz: str = Field(default_factory=default_timezone, description="Time zone for the day")
     min_duration_minutes: int = Field(30, ge=1, description="Minimum free-slot length in minutes")
 
 

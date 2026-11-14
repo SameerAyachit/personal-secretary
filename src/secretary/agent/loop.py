@@ -66,10 +66,24 @@ def _build_context(user_text: str, ctx: dict[str, Any]) -> list[dict]:
     return messages
 
 
-async def _execute_call(call: ToolCall, registry: Registry, conn, turn_id: str) -> dict:
+def _hide_tz(schema: dict) -> dict:
+    """Copy of a tool schema without ``tz``: the app, not the model, owns the timezone."""
+    params = schema.get("parameters")
+    if not params or "tz" not in params.get("properties", {}):
+        return schema
+    props = {k: v for k, v in params["properties"].items() if k != "tz"}
+    required = [r for r in params.get("required", []) if r != "tz"]
+    return {**schema, "parameters": {**params, "properties": props, "required": required}}
+
+
+async def _execute_call(
+    call: ToolCall, registry: Registry, conn, turn_id: str, tz: str | None = None
+) -> dict:
     spec = registry.get(call.name)
     if spec is None:
         return {"error": f"unknown tool {call.name}"}
+    if tz and spec.args_model is not None and "tz" in spec.args_model.model_fields:
+        call = ToolCall(call_id=call.call_id, name=call.name, args={**call.args, "tz": tz})
     if spec.args_model is not None:
         try:
             args = spec.args_model(**call.args).model_dump()
@@ -137,9 +151,15 @@ async def run_turn(
     selected = router.select(user_text, ctx or {})
     logger.info("chat turn %s: started selected_tools=%s", turn_id,
                 [t.name for t in selected])
-    tool_schemas = list(
-        {s["name"]: s for s in registry.schemas() if s["name"] in {t.name for t in selected}}.values()
-    ) or list(registry.schemas())
+    tool_schemas = [
+        _hide_tz(s)
+        for s in (
+            list(
+                {s["name"]: s for s in registry.schemas() if s["name"] in {t.name for t in selected}}.values()
+            )
+            or registry.schemas()
+        )
+    ]
 
     while True:
         guard_steps += 1
@@ -200,7 +220,7 @@ async def run_turn(
 
         for call in calls:
             logger.info("chat turn %s: tool call %s", turn_id, call.name)
-            result = await _execute_call(call, registry, conn, turn_id)
+            result = await _execute_call(call, registry, conn, turn_id, tz=ctx.get("tz"))
             messages.append(
                 {
                     "role": "assistant",

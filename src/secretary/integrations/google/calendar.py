@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from secretary.config import default_timezone
 from secretary.integrations.google.auth import GoogleAuth
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
@@ -22,7 +23,6 @@ from secretary.store.repos import settings as settings_repo
 
 CALENDAR_API = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 SYNC_TOKEN_KEY = "google_sync_token"
-_DEFAULT_TZ = "Asia/Kolkata"
 
 
 class GoogleCalendarError(Exception):
@@ -162,7 +162,7 @@ def _parse_times(item: dict) -> tuple[str, str, int]:
     end = item.get("end", {}) or {}
     if "date" in start:  # all-day event
         day = datetime.fromisoformat(start["date"]).date()
-        zone = ZoneInfo(start.get("timeZone", _DEFAULT_TZ))
+        zone = ZoneInfo(start.get("timeZone") or default_timezone())
         start_local = datetime(day.year, day.month, day.day, tzinfo=zone)
         end_local = start_local + timedelta(days=1)
         return start_local.astimezone(UTC).isoformat(), end_local.astimezone(UTC).isoformat(), 1
@@ -188,7 +188,7 @@ def _upsert_event(conn: Connection, item: dict, turn_id: str) -> str:
         "title": item.get("summary") or "(no title)",
         "start_at": start_at,
         "end_at": end_at,
-        "tz": (item.get("start") or {}).get("timeZone", _DEFAULT_TZ),
+        "tz": (item.get("start") or {}).get("timeZone") or default_timezone(),
         "all_day": all_day,
         "location": item.get("location"),
         "notes": item.get("description"),
