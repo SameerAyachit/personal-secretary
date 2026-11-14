@@ -51,7 +51,7 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
-from secretary.timeparse.when import resolve_when
+from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.planning import plan_day
 from secretary.tools.research import research_brief_tool
 
@@ -157,21 +157,6 @@ class Controller(QObject):
             return []
 
     # ------------------------------------------------------------------ Chat history
-
-    def resolve_when_text(self, text: str, tz_name: str | None = None) -> str | None:
-        """Resolve a user time expression to a UTC ISO string, or None if unparseable.
-
-        Runs in code (never by the LLM). Used by the UI quick-add path.
-        """
-        cfg = load_config()
-        tz_name = tz_name or cfg.app.timezone or "UTC"
-        zone = ZoneInfo(tz_name)
-        now_local = datetime.now(UTC).astimezone(zone)
-        try:
-            fire_local = resolve_when(text, now_local, tz_name)
-            return fire_local.astimezone(UTC).isoformat()
-        except Exception:
-            return None
 
     def get_recent_chat_messages(self, limit: int = 8) -> list[dict]:
         """Return recent user/assistant chat messages for turn context history.
@@ -677,26 +662,24 @@ class Controller(QObject):
         )
 
     @Slot(str, str)
-    def create_reminder_manual(self, title: str, when_text: str) -> None:
+    def create_reminder_manual(self, title: str, when_text: str) -> bool:
+        """Create a once-reminder from ``when_text`` (resolved in code).
+
+        Returns False (after telling the UI why) when no time can be resolved,
+        so a reminder that could never fire is never created.
+        """
         cfg = load_config()
         tz_name = cfg.app.timezone or "UTC"
-        zone = ZoneInfo(tz_name)
-        now_local = datetime.now(UTC).astimezone(zone)
-        self._turn_id += 1
-        turn_id = f"manual-{self._turn_id}"
+        now_local = datetime.now(UTC).astimezone(ZoneInfo(tz_name))
         try:
-            fire_utc = None
-            if when_text and when_text.strip():
-                fire_local = resolve_when(when_text, now_local, tz_name)
-                fire_utc = fire_local.astimezone(UTC).isoformat()
-            else:
-                # No time could be resolved: don't create a reminder that can
-                # never fire. Tell the UI what really happened.
-                self.turn_status.emit(
-                    f"Couldn't parse '{when_text}' — please include a time "
-                    "(e.g. 'in 1 minute', 'tomorrow at 9am')."
-                )
-                return
+            fire_local = resolve_when(when_text, now_local, tz_name)
+        except Exception:
+            self.turn_status.emit(
+                f"Couldn't parse '{when_text}' — please include a time "
+                "(e.g. 'in 1 minute', 'tomorrow at 9am')."
+            )
+            return False
+        try:
             reminders_repo.create(
                 self.conn,
                 task_id=None,
@@ -705,13 +688,20 @@ class Controller(QObject):
                 kind="once",
                 tz=tz_name,
                 rule_json=None,
-                next_fire_at=fire_utc,
-                turn_id=turn_id,
+                next_fire_at=fire_local.astimezone(UTC).isoformat(),
+                turn_id=self._new_turn_id("manual"),
             )
-            self.tasks_changed.emit()
-            self.turn_status.emit(f"Reminder created: {title}")
         except Exception as exc:  # surface to UI
             self.error.emit("reminder_create", str(exc))
+            return False
+        self.tasks_changed.emit()
+        self.turn_status.emit(f"Reminder created: {title}")
+        return True
+
+    def quick_add_reminder(self, text: str) -> bool:
+        """Quick-add "remind me to X in 10 minutes": the time phrase is
+        extracted and resolved here (timeparse), never in the UI."""
+        return self.create_reminder_manual(text, extract_when_phrase(text))
 
     @Slot(str)
     def approve_action(self, action_id: str) -> None:

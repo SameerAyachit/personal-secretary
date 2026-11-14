@@ -81,11 +81,12 @@ def test_google_connect_stores_token_and_updates_controller(
         params = parse_qs(urlparse(url).query)
         redirect_uri = unquote(params.get("redirect_uri", [""])[0])
         port = urlparse(redirect_uri).port
+        state = params["state"][0]
 
         def hit():
             time.sleep(0.2)
             urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/?code=auth-code&state=xyz", timeout=5
+                f"http://127.0.0.1:{port}/?code=auth-code&state={state}", timeout=5
             )
 
         threading.Thread(target=hit, daemon=True).start()

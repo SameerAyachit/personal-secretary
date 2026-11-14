@@ -1,13 +1,16 @@
 """Google OAuth consent flow: loopback redirect + PKCE, token endpoint mocked with respx."""
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
+import pytest
 
 import secretary.integrations.google.oauth as oauth_module
 from secretary.integrations.google.oauth import (
@@ -92,7 +95,7 @@ def test_run_stores_refresh_token(respx_mock, monkeypatch, tmp_path):
     monkeypatch.setattr(oauth_module, "delete_secret", store.pop)
 
     flow = GoogleOAuthFlow.from_credentials_file(creds)
-    monkeypatch.setattr(flow, "_run_server", lambda port: "auth-code")
+    monkeypatch.setattr(flow, "_run_server", lambda port, state=None: "auth-code")
     monkeypatch.setattr(oauth_module.webbrowser, "open", lambda url: None)
 
     rt = flow.run()
@@ -105,7 +108,7 @@ def test_run_no_refresh_token_raises(respx_mock, monkeypatch, tmp_path):
     _mock_token_route(respx_mock, payload={"access_token": "at-1"})
 
     flow = GoogleOAuthFlow.from_credentials_file(creds)
-    monkeypatch.setattr(flow, "_run_server", lambda port: "auth-code")
+    monkeypatch.setattr(flow, "_run_server", lambda port, state=None: "auth-code")
     monkeypatch.setattr(oauth_module.webbrowser, "open", lambda url: None)
 
     try:
@@ -165,11 +168,12 @@ def test_full_flow_real_loopback_stores_refresh_token(respx_mock, monkeypatch, t
         params = parse_qs(urlparse(url).query)
         redirect_uri = params.get("redirect_uri", [""])[0]
         port = urlparse(redirect_uri).port
+        state = params["state"][0]
 
         def hit() -> None:
             time.sleep(0.3)
             urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/?code=auth-code&state=xyz", timeout=5
+                f"http://127.0.0.1:{port}/?code=auth-code&state={state}", timeout=5
             )
 
         threading.Thread(target=hit, daemon=True).start()
@@ -206,10 +210,11 @@ def test_unexpected_flow_exception_swallowed_before_fix(respx_mock, monkeypatch,
     def fake_open(url):
         params = parse_qs(urlparse(url).query)
         port = urlparse(unquote(params.get("redirect_uri", [""])[0])).port
+        state = params["state"][0]
 
         def hit():
             time.sleep(0.3)
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/?code=auth-code&state=xyz", timeout=5)
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/?code=auth-code&state={state}", timeout=5)
 
         threading.Thread(target=hit, daemon=True).start()
 
@@ -226,3 +231,39 @@ def test_unexpected_flow_exception_swallowed_before_fix(respx_mock, monkeypatch,
         pass  # the unexpected exception escapes run() and must be caught by the caller
     else:
         raise AssertionError("expected RuntimeError to escape run()")
+
+
+def test_redirect_with_wrong_state_is_rejected(respx_mock, monkeypatch, tmp_path):
+    """CSRF guard: a redirect whose state differs from ours must not yield a code."""
+    creds = _write_credentials(tmp_path)
+    store: dict[str, str] = {}
+    monkeypatch.setattr(oauth_module, "set_secret", store.__setitem__)
+    monkeypatch.setattr(oauth_module, "get_secret", store.get)
+    flow = GoogleOAuthFlow.from_credentials_file(creds)
+
+    def fake_open(url):
+        params = parse_qs(urlparse(url).query)
+        port = urlparse(unquote(params["redirect_uri"][0])).port
+
+        def hit():
+            time.sleep(0.2)
+            with contextlib.suppress(urllib.error.HTTPError):
+                urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/?code=evil-code&state=attacker", timeout=5
+                )
+
+        threading.Thread(target=hit, daemon=True).start()
+
+    monkeypatch.setattr(oauth_module.webbrowser, "open", fake_open)
+    with pytest.raises(GoogleOAuthError, match="state"):
+        flow.run()
+    assert not store  # nothing stored
+    assert GoogleOAuthFlow._flow_running is False  # released after failure
+
+
+def test_second_concurrent_flow_is_refused(monkeypatch, tmp_path):
+    creds = _write_credentials(tmp_path)
+    monkeypatch.setattr(GoogleOAuthFlow, "_flow_running", True)
+    flow = GoogleOAuthFlow.from_credentials_file(creds)
+    with pytest.raises(GoogleOAuthError, match="already in progress"):
+        flow.run()

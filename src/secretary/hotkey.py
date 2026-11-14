@@ -1,18 +1,29 @@
-"""Global hotkey spike for quick capture.
+"""Global hotkey for quick capture via Win32 ``RegisterHotKey`` (plan §20.5, C-7).
 
-Uses Win32 ``RegisterHotKey`` behind an import guard so the rest of the app runs
-headless / on non-Windows. Registration result is surfaced as an error rather
-than silently failing (plan §20.5, C-7).
+Pure ``ctypes`` (no pywin32). The hotkey is registered for the calling thread
+(the GUI thread, ``hWnd=NULL``); Windows then posts ``WM_HOTKEY`` to that
+thread's queue, where :class:`HotkeyFilter` sees it through Qt's native event
+filter. A failed registration (for example another app owns the combination)
+is logged, never raised, so the rest of the app keeps running.
 """
 
 from __future__ import annotations
 
 import ctypes
-import importlib
+import logging
+import sys
 from collections.abc import Callable
 from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter
+
+logger = logging.getLogger(__name__)
+
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+_HOTKEY_ID = 0x5EC1
 
 
 class MSG(ctypes.Structure):
@@ -26,79 +37,40 @@ class MSG(ctypes.Structure):
     ]
 
 
-class HotkeyError(Exception):
-    pass
+def _user32():
+    """The user32 DLL, or None off Windows. Separate function so tests can fake it."""
+    return ctypes.windll.user32 if sys.platform == "win32" else None
 
 
 class GlobalHotkey:
-    """Registers a system-wide hotkey that invokes a callback on the main thread."""
+    """Registers a system-wide hotkey; :class:`HotkeyFilter` delivers the press."""
 
     def __init__(self, modifiers: int, vk: int, callback: Callable[[], None]) -> None:
-        self._modifiers = modifiers
-        self._vk = vk
-        self._callback = callback
-        self._registered = False
-        self._hwnd = None
-        self._atom = None
-        self._try_register()
-
-    def _try_register(self) -> None:
-        try:
-            win32gui = importlib.import_module("win32gui")
-            win32con = importlib.import_module("win32con")
-        except ImportError:
-            # pywin32 not available (or not Windows): hotkey unavailable.
+        self.id = _HOTKEY_ID
+        self.callback = callback
+        self.registered = False
+        user32 = _user32()
+        if user32 is None:
             return
-        try:
-            self._hwnd = win32gui.CreateWindow(win32con.Static, "SecretaryHotkey", 0, 0, 0, 0, 0, 0, 0, 0, None)
-            self._atom = win32gui.GlobalAddAtom("SecretaryHotkey")
-            ok = win32gui.RegisterHotKey(self._hwnd, self._atom, self._modifiers, self._vk)
-            self._registered = bool(ok)
-        except OSError:
-            self._registered = False
-
-    @property
-    def registered(self) -> bool:
-        return self._registered
-
-    def unregister(self) -> None:
-        if self._registered and self._hwnd is not None and self._atom is not None:
-            try:
-                win32gui = importlib.import_module("win32gui")
-                win32gui.UnregisterHotKey(self._hwnd, self._atom)
-            except (ImportError, OSError):
-                pass
-            self._registered = False
-
-    def check_message(self, msg_hwnd, msg, wparam, lparam) -> bool:
-        """Call from the Win32 message pump; returns True if the hotkey fired."""
-        if not self._registered:
-            return False
-        try:
-            win32con = importlib.import_module("win32con")
-        except ImportError:
-            return False
-        if msg == win32con.WM_HOTKEY and wparam == self._atom:
-            self._callback()
-            return True
-        return False
+        self.registered = bool(user32.RegisterHotKey(None, self.id, modifiers | MOD_NOREPEAT, vk))
+        if not self.registered:
+            logger.warning(
+                "global hotkey registration failed (winerror=%s); the combination may be in use",
+                ctypes.GetLastError(),
+            )
 
 
 class HotkeyFilter(QAbstractNativeEventFilter):
-    """Qt native event filter that forwards WM_HOTKEY messages to a GlobalHotkey."""
+    """Qt native event filter that turns ``WM_HOTKEY`` into one callback call."""
 
-    def __init__(self, hotkey: GlobalHotkey, callback: Callable[[], None]) -> None:
+    def __init__(self, hotkey: GlobalHotkey) -> None:
         super().__init__()
         self._hotkey = hotkey
-        self._callback = callback
 
     def nativeEventFilter(self, eventType, message):  # type: ignore[override]
-        if eventType == b"windows_generic_MSG":
+        if eventType == b"windows_generic_MSG" and self._hotkey.registered:
             msg = ctypes.cast(int(message), ctypes.POINTER(MSG)).contents
-            if msg.message == 0x0312 and self._hotkey.check_message(
-                msg.hwnd, msg.message, msg.wParam, msg.lParam
-            ):
-                self._callback()
-                return True
-        return False
-
+            if msg.message == WM_HOTKEY and msg.wParam == self._hotkey.id:
+                self._hotkey.callback()
+                return True, 0
+        return False, 0

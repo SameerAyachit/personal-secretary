@@ -7,6 +7,7 @@ only when a time is actually parsed (plan §9.2 performance row).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -103,6 +104,28 @@ def resolve_date(text: str, now: datetime, tz: str):
     else:
         dt = dt.astimezone(zone)
     return dt.date()
+
+
+_WHEN_PHRASES = (
+    re.compile(r"in\s+\d+\s*(minutes?|hours?|days?|weeks?)", re.IGNORECASE),
+    re.compile(r"today\s+at\s+\d+", re.IGNORECASE),
+    re.compile(r"at\s+\d+", re.IGNORECASE),
+    re.compile(r"tomorrow", re.IGNORECASE),
+    re.compile(r"next\s+\w+", re.IGNORECASE),
+    re.compile(r"\d+\s*(minutes?|hours?)", re.IGNORECASE),
+)
+
+
+def extract_when_phrase(text: str) -> str:
+    """Return the time expression inside a sentence (``"in 10 minutes"`` from
+    ``"remind me to drink water in 10 minutes"``), or ``text`` unchanged if
+    none is found. Quick-add input is a whole sentence; the resolver wants
+    only the time part."""
+    for pattern in _WHEN_PHRASES:
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
+    return text
 
 
 def warm_up() -> None:

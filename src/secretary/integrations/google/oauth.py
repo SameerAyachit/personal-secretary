@@ -67,6 +67,13 @@ class _RedirectHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
+        if "code" in params and params.get("state", [None])[0] != server._expected_state:
+            # CSRF guard: the redirect must carry the state we generated.
+            server._handler_error = "state_mismatch"
+            server._handler_error_description = "OAuth state did not match"
+            self.send_response(400)
+            self.end_headers()
+            return
         if "code" in params:
             server._handler_code = params["code"][0]
             server._handler_error = None
@@ -188,8 +195,9 @@ class GoogleOAuthFlow:
         with HTTPServer(("127.0.0.1", 0), _RedirectHandler) as server:
             return server.server_address[1]
 
-    def _run_server(self, port: int) -> str:
+    def _run_server(self, port: int, expected_state: str | None = None) -> str:
         server = HTTPServer(("127.0.0.1", port), _RedirectHandler)
+        server._expected_state = expected_state
         server._handler_code = None
         server._handler_error = None
         server._handler_error_description = None
@@ -227,9 +235,9 @@ class GoogleOAuthFlow:
 
         Only one flow may run at a time; the browser is opened once.
         """
-        if self._flow_running:
+        if GoogleOAuthFlow._flow_running:
             raise GoogleOAuthError("An OAuth flow is already in progress")
-        self._flow_running = True
+        GoogleOAuthFlow._flow_running = True
         try:
             logger.info("google oauth flow starting")
             port = self._pick_port()
@@ -239,7 +247,7 @@ class GoogleOAuthFlow:
             url = self.authorization_url(state, code_challenge, redirect_uri)
             logger.info("google consent url opened in browser")
             webbrowser.open(url)
-            code = self._run_server(port)
+            code = self._run_server(port, state)
             logger.info("google authorization code received")
             tokens = self.exchange_code(code, code_verifier, redirect_uri)
             refresh_token = tokens.get("refresh_token")
@@ -256,7 +264,7 @@ class GoogleOAuthFlow:
             logger.info("google refresh token stored in Credential Manager")
             return refresh_token
         finally:
-            self._flow_running = False
+            GoogleOAuthFlow._flow_running = False
 
 
 def connected() -> bool:

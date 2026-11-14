@@ -30,10 +30,10 @@ from .config import load_config
 from .controller import Controller, get_active_llm_key
 from .diagnose import run_diagnose
 from .errors import install_excepthooks, install_reporter
-from .hotkey import GlobalHotkey, HotkeyFilter
+from .hotkey import MOD_ALT, MOD_CONTROL, GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
-from .paths import backups_dir, config_path, credentials_path, db_path
+from .paths import backups_dir, config_path, credentials_path, db_path, logs_dir
 from .scheduler.catchup import catch_up
 from .scheduler.ticker import SchedulerThread
 from .store.backup import backup_if_due
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    setup_logging()
+    setup_logging(log_file=str(logs_dir() / "secretary.log"))
     install_excepthooks()
 
     if args.diagnose:
@@ -166,8 +166,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # Global hotkey for quick capture (Ctrl+Alt+Space).
         quick_capture = QuickCapture(controller)
-        hotkey = GlobalHotkey(0x0003, 0x20, quick_capture.show_window)
-        hotkey_filter = HotkeyFilter(hotkey, quick_capture.show_window)
+        hotkey = GlobalHotkey(MOD_ALT | MOD_CONTROL, 0x20, quick_capture.show_window)
+        hotkey_filter = HotkeyFilter(hotkey)
         app.app.installNativeEventFilter(hotkey_filter)
 
         # Scheduler thread fires reminders into the inbox.

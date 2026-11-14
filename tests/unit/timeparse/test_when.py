@@ -10,6 +10,7 @@ from secretary.timeparse.when import (
     SYNONYMS,
     AmbiguousTime,
     PastTime,
+    extract_when_phrase,
     normalize_text,
     resolve_when,
     warm_up,
@@ -90,3 +91,9 @@ def test_format_when():
 def test_warm_up_runs_without_error():
     # dateparser warm-up on the worker thread must not raise.
     warm_up()
+
+
+def test_extract_when_phrase_pulls_the_time_expression():
+    assert extract_when_phrase("remind me to drink water in 10 minutes") == "in 10 minutes"
+    assert extract_when_phrase("remind me to call mum tomorrow") == "tomorrow"
+    assert extract_when_phrase("remind me to stretch") == "remind me to stretch"  # no phrase: unchanged

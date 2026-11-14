@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -83,29 +81,9 @@ class TasksView(QWidget):
         if not title:
             return
         if "remind" in title.lower():
-            cfg = self._controller.get_config()
-            tz_name = cfg.get("timezone", "UTC") or "UTC"
-            # Extract a time expression from the text (e.g. "in 1 minute" from
-            # "remind me to drink water in 1 minute") and resolve it via the
-            # controller, which owns timeparse. Resolve once to validate before
-            # saving.
-            when_text = title
-            for _pat in (
-                r"in\s+\d+\s*(minute|minutes|hour|hours|day|days|week|weeks)",
-                r"at\s+\d+",
-                r"tomorrow",
-                r"today\s+at\s+\d+",
-                r"next\s+\w+",
-                r"\d+\s*(minute|minutes|hour|hours)",
-            ):
-                _m = re.search(_pat, title, re.IGNORECASE)
-                if _m:
-                    when_text = _m.group(0)
-                    break
-            fire_utc = self._controller.resolve_when_text(when_text, tz_name)
-            if fire_utc is None:
-                # No parseable time: tell the user what really happened instead
-                # of saving a reminder that can never fire.
+            if not self._controller.quick_add_reminder(title):
+                # No parseable time: say so instead of saving a reminder that
+                # can never fire.
                 self._status.setText(
                     f"Couldn't parse a time from '{title}'. "
                     "Try 'remind me to X in 1 minute' or 'remind me to X at 5pm'."
@@ -113,9 +91,6 @@ class TasksView(QWidget):
                 self._status.setHidden(False)
                 self._input.clear()
                 return
-            # create_reminder_manual re-resolves; pass the resolved fire time
-            # as when_text so it stores the correct next_fire_at.
-            self._controller.create_reminder_manual(title, fire_utc)
             self._status.setText(f"Reminder created: {title}")
         else:
             self._controller.create_task_manual(title, "")

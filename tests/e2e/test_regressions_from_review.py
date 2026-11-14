@@ -243,20 +243,19 @@ def test_connect_google_twice_starts_one_flow(respx_mock, monkeypatch, tmp_path)
 
     # Mock webbrowser.open and _run_server to avoid real browser/HTTP server.
     monkeypatch.setattr(oauth_module.webbrowser, "open", lambda url: None)
-    monkeypatch.setattr(flow, "_run_server", lambda port: "auth-code")
+    monkeypatch.setattr(flow, "_run_server", lambda port, state=None: "auth-code")
 
     # First run succeeds.
     rt1 = flow.run()
     assert rt1 == "rt-xyz"
 
     # Second run raises because one flow at a time (simulate a flow in progress).
-    flow._flow_running = True
+    monkeypatch.setattr(GoogleOAuthFlow, "_flow_running", True)
     try:
         flow.run()
         raise AssertionError("expected GoogleOAuthError")
     except GoogleOAuthError as exc:
         assert "already in progress" in str(exc)
-    flow._flow_running = False
 
 
 # F6: Settings opens with blocked network without freezing (heartbeat gap under 300 ms).
