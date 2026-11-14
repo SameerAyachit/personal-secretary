@@ -112,3 +112,17 @@ def test_chat_no_clip_at_sizes_and_themes() -> None:
             # Error bubble carries the danger left border.
             style = error.styleSheet()
             assert "border-left" in style and ("#c62828" in style.lower() or "#ff6b6b" in style.lower()), style
+
+
+def test_send_disabled_while_turn_runs_and_errors_styled():
+    app = QApplication.instance() or QApplication([])
+    controller = Controller(_conn())
+    controller.send_message = lambda text, priority="interactive": None  # no LLM
+    view = ChatView(controller)
+    view._input.setText("remind me to drink water in 10 minutes")
+    view._on_send()
+    assert not view._send_btn.isEnabled()
+    controller.turn_finished.emit("I hit an error: provider returned 401: bad key")
+    app.processEvents()
+    assert view._send_btn.isEnabled()
+    assert any(b.property("kind") == "error" for b in _bubbles(view))

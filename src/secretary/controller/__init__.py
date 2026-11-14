@@ -15,7 +15,9 @@ import logging
 import shutil
 import threading
 import time
+import uuid
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,7 +38,7 @@ from secretary.integrations.google.oauth import (
     disconnect,
     is_invalid_grant,
 )
-from secretary.llm.limiter import Limiter
+from secretary.llm.factory import build_llm
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.llm.probe import _probe_once
 from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
@@ -119,6 +121,15 @@ class Controller(QObject):
         # operations can stop them before wiping the DB (plan E18).
         self._scheduler = None
         self._worker = None
+
+    def _new_turn_id(self, prefix: str = "turn") -> str:
+        """Globally unique turn id (never repeats across launches).
+
+        Idempotency keys hash the turn id, so a per-launch counter would make
+        the same request in a new session collide with an old reminder.
+        """
+        self._turn_id += 1
+        return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
     def set_scheduler(self, scheduler) -> None:
         self._scheduler = scheduler
@@ -262,23 +273,7 @@ class Controller(QObject):
         loop uses the new settings without a restart (plan A5). Limiter values
         come from config, not code constants.
         """
-        self.llm = None
-        self.limiter = None
-        key = get_active_llm_key()
-        cfg = load_config()
-        provider = cfg.llm.active
-        prov = cfg.llm.providers.get(provider)
-        if prov is None:
-            return
-        model = prov.primary_model or ""
-        if not key or not model or model.lower().startswith(("fake", "test")):
-            return
-        self.llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=model)
-        lim_cfg = cfg.llm.limits.get(provider + "_primary")
-        rpm = lim_cfg.rpm if lim_cfg else 60
-        tpm = lim_cfg.tpm if lim_cfg else 6000
-        safety = lim_cfg.safety_factor if lim_cfg else 0.7
-        self.limiter = Limiter(rpm=max(rpm, 1), tpm=max(tpm, 1), safety=safety)
+        self.llm, self.limiter = build_llm(load_config(), get_active_llm_key())
 
     def get_config(self) -> dict:
         """Return current config values for the wizard to pre-fill."""
@@ -559,10 +554,9 @@ class Controller(QObject):
                 "No model selected. Open Settings > AI and pick one."
             )
             return
-        self._turn_id += 1
-        turn_id = f"turn-{self._turn_id}"
+        turn_id = self._new_turn_id()
         self.turn_status.emit("Thinking...")
-        logger.info("chat turn %s: send_message user_text=%r", self._turn_id, text)
+        logger.info("chat turn %s: send_message user_text=%r", turn_id, text)
         if self._submit_coro is None:
             self.turn_finished.emit(
                 "I hit an error: LLM worker loop is not available."
@@ -591,9 +585,9 @@ class Controller(QObject):
             self.conn,
         )
         future = self._submit_coro(coro)
-        future.add_done_callback(self._on_turn_done)
+        future.add_done_callback(partial(self._on_turn_done, turn_id))
 
-    def _on_turn_done(self, future: asyncio.Future) -> None:
+    def _on_turn_done(self, turn_id: str, future: asyncio.Future) -> None:
         """Deliver a completed turn result back to the UI via a Qt signal.
 
         Runs on the worker thread; turn_finished is delivered to GUI receivers
@@ -602,10 +596,10 @@ class Controller(QObject):
         try:
             result = future.result()
         except Exception as exc:
-            logger.exception("chat turn %s: run_turn raised", self._turn_id)
+            logger.exception("chat turn %s: run_turn raised", turn_id)
             self.turn_finished.emit(f"I hit an error: {exc}")
             return
-        self._store_chat_message("assistant", result or "", f"turn-{self._turn_id}")
+        self._store_chat_message("assistant", result or "", turn_id)
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
     @Slot(str)

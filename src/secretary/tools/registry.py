@@ -47,14 +47,16 @@ class Registry:
         return list(self._tools.values())
 
     def schemas(self) -> list[dict]:
-        """OpenAI-compatible tool schemas, annotated with safety class + group."""
+        """OpenAI-compatible tool schemas (name/description/parameters only).
+
+        Safety class and group stay on :class:`ToolSpec`; strict providers
+        reject unknown properties inside a function definition.
+        """
         out: list[dict] = []
         for spec in self._tools.values():
             schema: dict[str, Any] = {
                 "name": spec.name,
                 "description": spec.description,
-                "safety_class": spec.safety_class.value,
-                "group": spec.group,
             }
             if spec.args_model is not None:
                 schema["parameters"] = spec.args_model.model_json_schema()

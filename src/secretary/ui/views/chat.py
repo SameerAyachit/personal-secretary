@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from secretary.ui.theme import resolve_theme, tokens
 
 _MAX_BUBBLE_WIDTH_RATIO = 0.66
+_ERROR_PREFIX = "I hit an error: "
 
 
 def _current_palette(controller) -> object:
@@ -105,9 +106,8 @@ class _ChatBubble(QFrame):
 
 def _short_error(text: str) -> str:
     """Plain-language short form of an error message."""
-    prefix = "I hit an error: "
-    if text.startswith(prefix):
-        text = text[len(prefix):]
+    if text.startswith(_ERROR_PREFIX):
+        text = text[len(_ERROR_PREFIX):]
     # Keep only the first sentence / clause so it stays short.
     for sep in (". ", ":\n", "\n"):
         if sep in text:
@@ -144,17 +144,23 @@ class ChatView(QWidget):
         intro.setObjectName("Caption")
         self._container_layout.addWidget(intro)
 
+        self._status = QLabel("")
+        self._status.setObjectName("Caption")
+        self._status.setVisible(False)  # shown only while a turn has a status
+        layout.addWidget(self._status)
+
         send_row = QHBoxLayout()
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a message...")
         self._input.returnPressed.connect(self._on_send)
-        send_btn = QPushButton("Send")
-        send_btn.setObjectName("Accent")
-        send_btn.clicked.connect(self._on_send)
+        self._send_btn = QPushButton("Send")
+        self._send_btn.setObjectName("Accent")
+        self._send_btn.clicked.connect(self._on_send)
         send_row.addWidget(self._input)
-        send_row.addWidget(send_btn)
+        send_row.addWidget(self._send_btn)
         layout.addLayout(send_row)
 
+        self._controller.turn_status.connect(self._set_status)
         self._controller.turn_finished.connect(self._on_turn_finished)
         self._controller.error.connect(self._on_controller_error)
 
@@ -191,8 +197,23 @@ class ChatView(QWidget):
 
     @Slot(str)
     def _on_turn_finished(self, text: str) -> None:
-        if text:
+        self._set_busy(False)
+        if text.startswith(_ERROR_PREFIX):
+            self._add_message("Secretary:", text, "error", technical=text[len(_ERROR_PREFIX):])
+        elif text:
             self._add_assistant(text)
+
+    def _set_status(self, text: str) -> None:
+        self._status.setText(text)
+        self._status.setVisible(bool(text))
+
+    def _set_busy(self, busy: bool) -> None:
+        """Block overlapping turns: Send is disabled until the turn finishes."""
+        self._send_btn.setEnabled(not busy)
+        self._input.setEnabled(not busy)
+        if not busy:
+            self._set_status("")
+            self._input.setFocus()
 
     @Slot(str, str)
     def _on_controller_error(self, action: str, message: str) -> None:
@@ -206,4 +227,5 @@ class ChatView(QWidget):
             return
         self._add_user(text)
         self._input.clear()
+        self._set_busy(True)
         self._controller.send_message(text)

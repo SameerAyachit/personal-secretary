@@ -25,8 +25,7 @@ from secretary.integrations.google.auth import GoogleAuth
 from secretary.integrations.google.calendar import CalendarClient
 from secretary.integrations.google.gmail import GmailClient
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
-from secretary.llm.limiter import Limiter
-from secretary.llm.openai_compat import OpenAICompatClient
+from secretary.llm.factory import build_llm
 from secretary.selftest import run_selftest
 from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
@@ -166,37 +165,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         conn = Connection(db_path())
         migrate(conn._con, migrations_folder(), lambda: None)
-        controller = Controller(conn)
-
         # Tool registry + router (plan A7).
         registry, router = build_registry_and_router()
 
-        # LLM provider, limiter.
-        llm = None
-        limiter = None
-        key = get_active_llm_key()
+        # LLM provider + limiter (single factory shared with Controller.rebuild_llm).
         cfg = load_config()
-        provider = cfg.llm.active
-        prov = cfg.llm.providers[provider]
-        model = prov.primary_model or ""
+        key = get_active_llm_key()
+        llm, limiter = build_llm(cfg, key)
+        prov = cfg.llm.providers[cfg.llm.active]
         logger.info(
-            "llm config: path=%s provider=%s model=%r key_name=%s",
-            config_path(),
-            provider,
-            model,
-            prov.key_name,
+            "llm config: path=%s provider=%s model=%r configured=%s",
+            config_path(), cfg.llm.active, prov.primary_model, llm is not None,
         )
-        if key:
-            if not model or model.lower().startswith(("fake", "test")):
-                logger.warning(
-                    "LLM model not configured for provider %s in %s; "
-                    "open Settings > AI and pick a model",
-                    provider,
-                    config_path(),
-                )
-            else:
-                llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=model)
-                limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
+        if key and llm is None:
+            logger.warning("LLM model not configured; open Settings > AI and pick a model")
         controller = Controller(
             conn,
             registry=registry,

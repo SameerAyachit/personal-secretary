@@ -32,9 +32,10 @@ def test_list_and_schemas():
     assert names == {"task_create", "task_list", "email_send"}
     schemas = reg.schemas()
     assert {s["name"] for s in schemas} == names
-    # Every schema carries its safety class and group.
+    # Provider-facing schemas carry only standard function keys.
     for s in schemas:
-        assert "safety_class" in s and "group" in s
+        assert set(s) <= {"name", "description", "parameters"}
+    assert reg.get("email_send").group == "email"
 
 
 def test_class_c_never_auto_executes():

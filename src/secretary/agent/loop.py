@@ -47,10 +47,6 @@ SYSTEM_PROMPT = (
 )
 
 
-class LoopLimitExceeded(Exception):
-    pass
-
-
 def _estimate_tokens(messages: list[dict], tools: list[dict]) -> int:
     total = 0
     for m in messages:
@@ -123,7 +119,7 @@ async def run_turn(
     user_text: str,
     ctx: dict[str, Any],
     llm,
-    limiter: Limiter,
+    limiter: Limiter | None,
     router,
     registry: Registry,
     conn,
@@ -134,6 +130,9 @@ async def run_turn(
     start = time.monotonic()
     seen_call_keys: list[str] = []
     recent_sigs: list[str] = []
+    cfg = load_config()
+    max_steps = cfg.llm.max_steps or MAX_STEPS
+    timeout_s = cfg.llm.turn_timeout_seconds or TURN_TIMEOUT_SECONDS
     messages = _build_context(user_text, ctx)
     selected = router.select(user_text, ctx or {})
     logger.info("chat turn %s: started selected_tools=%s", turn_id,
@@ -144,20 +143,19 @@ async def run_turn(
 
     while True:
         guard_steps += 1
-        if guard_steps > MAX_STEPS:
+        if guard_steps > max_steps:
             return "I've reached the step limit for this turn. How would you like to proceed?"
-        if time.monotonic() - start > TURN_TIMEOUT_SECONDS:
+        if time.monotonic() - start > timeout_s:
             return "The turn timed out. Please try again."
 
         est = _estimate_tokens(messages, tool_schemas)
-        await limiter.acquire(
-            est,
-            priority=ctx.get("priority", "background"),
-            on_wait=ctx.get("ui_wait"),
-        )
-        cfg = load_config()
-        # Allow enough output for reasoning models; fall back to 400 tokens.
-        max_tokens = getattr(cfg.llm, "max_output_tokens", None) or 400
+        if limiter is not None:
+            await limiter.acquire(
+                est,
+                priority=ctx.get("priority", "background"),
+                on_wait=ctx.get("ui_wait"),
+            )
+        max_tokens = cfg.llm.max_output_tokens
         resp = await llm.chat(
             messages=messages,
             tools=tool_schemas,
@@ -165,9 +163,11 @@ async def run_turn(
             temperature=0.1,
             purpose="tool",
         )
-        limiter.reconcile(
-            resp.usage.get("total_tokens", 0), est, resp.headers.get("x-ratelimit-remaining-tokens")
-        )
+        if limiter is not None:
+            limiter.reconcile(
+                resp.usage.get("total_tokens", 0), est,
+                resp.headers.get("x-ratelimit-remaining-tokens"),
+            )
         resp = normalize_response(
             resp, allowed_tools={s["name"] for s in tool_schemas}
         )
