@@ -11,3 +11,7 @@ class RequestTooLarge(LLMError):
 
 class ProviderUnavailable(LLMError):
     """The provider is unavailable or returned an error status."""
+
+
+class AuthError(ProviderUnavailable):
+    """The provider rejected the API key (HTTP 401/403)."""

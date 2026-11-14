@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from .base import LLMClient, LLMResponse, ToolCall, parse_tool_args
-from .errors import ProviderUnavailable, RequestTooLarge
+from .errors import AuthError, ProviderUnavailable, RequestTooLarge
 
 _CHAT_PATH = "/chat/completions"
 _MODELS_PATH = "/models"
@@ -87,6 +87,11 @@ class OpenAICompatClient(LLMClient):
 
         if resp.status_code == 413:
             raise RequestTooLarge("request larger than the provider accepts")
+        if resp.status_code in (401, 403):
+            raise AuthError(
+                "The AI provider rejected the API key. "
+                "Open Settings > AI and enter a valid key."
+            )
         if resp.status_code >= 400:
             raise ProviderUnavailable(
                 f"provider returned {resp.status_code}: {resp.text[:200]}"

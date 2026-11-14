@@ -6,7 +6,7 @@ import pytest
 import respx
 from httpx import Response
 
-from secretary.llm.errors import ProviderUnavailable, RequestTooLarge
+from secretary.llm.errors import AuthError, ProviderUnavailable, RequestTooLarge
 from secretary.llm.openai_compat import OpenAICompatClient
 
 BASE = "https://api.groq.com/openai/v1"
@@ -168,3 +168,19 @@ async def test_missing_type_in_assistant_tool_call_returns_400():
             assert "type" in str(exc.value) and "missing" in str(exc.value)
         finally:
             await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_auth_failure_raises_auth_error(status):
+    with respx.mock:
+        respx.post(f"{BASE}/chat/completions").mock(
+            return_value=Response(status, json={"error": {"message": "Invalid API Key"}})
+        )
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            with pytest.raises(AuthError, match="Settings"):
+                await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    assert issubclass(AuthError, ProviderUnavailable)

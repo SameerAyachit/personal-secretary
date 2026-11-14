@@ -19,6 +19,7 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- A rejected API key (HTTP 401/403) now shows "The AI provider rejected the API key. Open Settings > AI and enter a valid key." instead of the raw provider error.
 - Cancelled reminders still fired (and were counted by catch-up) because the due query ignored `deleted_at`.
 - Reminder/event/plan tools defaulted to Asia/Kolkata and let the model pick the timezone; they now use the configured timezone, which the agent loop pins and hides from the model.
 - Gmail triage passed the message id as the user id, so every message fetch returned 403.
