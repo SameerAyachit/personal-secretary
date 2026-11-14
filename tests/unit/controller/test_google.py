@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secretary.controller as cm
+import secretary.controller as controller_module
 from secretary.controller import Controller
 from secretary.integrations.google.oauth import (
     CLIENT_ID_KEY,
@@ -139,3 +140,21 @@ def test_get_google_sync_status_failed(tmp_path):
     settings_repo.set(conn, "google_sync_error", "network down", turn_id="s")
     controller = Controller(conn)
     assert controller.get_google_sync_status() == {"failed": True, "error": "network down"}
+
+
+def test_rebuild_google_client_reaches_running_scheduler(monkeypatch):
+    """G2: connecting Google mid-session must hand clients to the scheduler."""
+    sentinel = (object(), object())
+    monkeypatch.setattr(controller_module, "build_clients", lambda path: sentinel)
+
+    class _Sched:
+        got = None
+
+        def set_google_clients(self, gmail, calendar):
+            self.got = (gmail, calendar)
+
+    controller = controller_module.Controller(conn=None)
+    sched = _Sched()
+    controller.set_scheduler(sched)
+    controller.rebuild_google_client()
+    assert sched.got == sentinel

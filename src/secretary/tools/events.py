@@ -9,11 +9,13 @@ absolute timestamp from the LLM.
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
+from secretary.integrations.google.oauth import connected as google_connected
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.timeparse.when import resolve_date, resolve_when
@@ -76,9 +78,16 @@ def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
         tz=parsed.tz,
         all_day=all_day,
         location=parsed.location,
+        # Client-chosen Google id + pending state: the scheduler pushes the event
+        # to Google Calendar, and a retry can never create a duplicate.
+        google_event_id=uuid.uuid4().hex,
+        sync_state="pending",
         turn_id=turn_id,
     )
     result = {"event_id": event_id, "title": parsed.title, "start_at": start_local.isoformat(), "all_day": bool(all_day)}
+    # Be honest with the model: saved locally now, Google push happens in the
+    # background and only if Google is connected.
+    result["google"] = "queued" if google_connected() else "not_connected"
     if conflicts:
         result["conflicts"] = conflicts
     return result

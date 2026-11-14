@@ -20,13 +20,14 @@ def create(
     notes: str | None = None,
     google_event_id: str | None = None,
     etag: str | None = None,
+    sync_state: str = "synced",
     turn_id: str | None = None,
 ) -> int:
     now = now_utc()
     cur = con.execute(
-        "INSERT INTO events(title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        (title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, now, now),
+        "INSERT INTO events(title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, "
+        "sync_state, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, sync_state, now, now),
     )
     eid = int(cur.lastrowid)
     action_log(con, turn_id, "created", "event", eid, {"title": title})
@@ -62,3 +63,27 @@ def update(
     params.append(event_id)
     cur = con.execute(f"UPDATE events SET {', '.join(sets)} WHERE id=? AND deleted_at IS NULL", params)
     return cur.rowcount > 0
+
+
+def list_pending(con: sqlite3.Connection, *, limit: int = 50) -> list[dict]:
+    """Local events waiting to be pushed to Google Calendar."""
+    cur = con.execute(
+        "SELECT * FROM events WHERE deleted_at IS NULL AND sync_state='pending' ORDER BY id LIMIT ?",
+        (limit,),
+    )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def set_sync_state(
+    con: sqlite3.Connection,
+    event_id: int,
+    state: str,
+    *,
+    etag: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Record the outcome of a push; ``etag`` is kept when not provided."""
+    con.execute(
+        "UPDATE events SET sync_state=?, sync_error=?, etag=COALESCE(?, etag), updated_at=? WHERE id=?",
+        (state, error, etag, now_utc(), event_id),
+    )

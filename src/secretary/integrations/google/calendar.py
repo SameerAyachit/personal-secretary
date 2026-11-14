@@ -1,6 +1,8 @@
-"""Google Calendar read sync with nextSyncToken (plan §10.6, §14).
+"""Google Calendar sync (plan §10.6, §13, §14).
 
-Windowed sync of ``events.list`` into the local events repo. All HTTP goes
+Windowed read sync of ``events.list`` into the local events repo, plus
+write-back of events created locally (``events.insert``, class B: own events
+only, no attendees). All HTTP goes
 through ``GoogleAuth`` (refresh handled there); tests mock httpx with respx, so
 no real Google credentials are needed. The OAuth consent flow itself remains
 human-gated.
@@ -94,6 +96,30 @@ class CalendarClient:
             pass
         return reason, message
 
+    def _api_error(self, exc: httpx.HTTPStatusError) -> GoogleCalendarError:
+        reason, message = self._parse_google_error(exc.response)
+        status_code = exc.response.status_code
+        detail = f"HTTP {status_code}" + (f" {reason}" if reason else "") + (
+            f": {message}" if message else ""
+        )
+        return GoogleCalendarError(
+            f"Calendar API call failed: {detail}", status_code=status_code, reason=reason
+        )
+
+    def insert_event(self, calendar_id: str, body: dict) -> dict:
+        """POST ``events.insert``; returns the created event resource."""
+        url = CALENDAR_API.format(calendar_id=calendar_id)
+        try:
+            response = self._client.post(
+                url, json=body, headers=self._auth.auth_header(), timeout=30.0
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise self._api_error(exc) from exc
+        except httpx.HTTPError as exc:
+            raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
+        return response.json()
+
     def list_events(
         self,
         calendar_id: str,
@@ -124,16 +150,7 @@ class CalendarClient:
                 raise GoogleCalendarSyncTokenInvalid(
                     "nextSyncToken is invalid; full resync required"
                 ) from exc
-            reason, message = self._parse_google_error(exc.response)
-            status_code = exc.response.status_code
-            detail = f"HTTP {status_code}" + (
-                f" {reason}" if reason else ""
-            ) + (f": {message}" if message else "")
-            raise GoogleCalendarError(
-                f"Calendar API call failed: {detail}",
-                status_code=status_code,
-                reason=reason,
-            ) from exc
+            raise self._api_error(exc) from exc
         except httpx.HTTPError as exc:
             raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
         return response.json()
@@ -269,3 +286,52 @@ def sync_calendar(
         settings_repo.set(conn, "google_sync_error", str(exc), turn_id=turn_id)
         raise
     return {"synced": synced, "deleted": deleted}
+
+
+def _event_body(row: dict) -> dict:
+    """Build the ``events.insert`` body for a local event row."""
+    body: dict = {"summary": row["title"]}
+    if row.get("google_event_id"):
+        body["id"] = row["google_event_id"]  # client-chosen id makes retries idempotent
+    if row.get("location"):
+        body["location"] = row["location"]
+    if row.get("notes"):
+        body["description"] = row["notes"]
+    tz = row["tz"]
+    start = datetime.fromisoformat(row["start_at"])
+    end = datetime.fromisoformat(row["end_at"]) if row.get("end_at") else None
+    if row["all_day"]:
+        zone = ZoneInfo(tz)
+        first = start.astimezone(zone).date()
+        last = end.astimezone(zone).date() if end else first + timedelta(days=1)
+        body["start"] = {"date": first.isoformat()}
+        body["end"] = {"date": last.isoformat()}
+    else:
+        body["start"] = {"dateTime": start.isoformat(), "timeZone": tz}
+        body["end"] = {"dateTime": (end or start + timedelta(hours=1)).isoformat(), "timeZone": tz}
+    return body
+
+
+def push_pending_events(conn: Connection, client: CalendarClient, calendar_id: str = "primary") -> int:
+    """Push locally created events to Google; returns how many were pushed.
+
+    A 409 means a previous attempt already created the event (same client id),
+    so it counts as pushed. Network/5xx/429 errors leave the event pending for
+    the next tick; other 4xx errors mark it failed with the reason recorded.
+    """
+    pushed = 0
+    for row in events_repo.list_pending(conn):
+        try:
+            created = client.insert_event(calendar_id, _event_body(row))
+        except GoogleCalendarError as exc:
+            if exc.status_code == 409:
+                events_repo.set_sync_state(conn, row["id"], "synced")
+                pushed += 1
+            elif exc.status_code is not None and exc.status_code < 500 and exc.status_code != 429:
+                events_repo.set_sync_state(conn, row["id"], "failed", error=exc.user_message())
+            else:
+                events_repo.set_sync_state(conn, row["id"], "pending", error=exc.user_message())
+            continue
+        events_repo.set_sync_state(conn, row["id"], "synced", etag=created.get("etag"))
+        pushed += 1
+    return pushed

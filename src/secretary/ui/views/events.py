@@ -28,6 +28,7 @@ class EventsView(QWidget):
         layout.addWidget(self._empty)
 
         self._controller.tasks_changed.connect(self.refresh)
+        self._controller.events_changed.connect(self.refresh)
         self.refresh()
 
     def refresh(self) -> None:

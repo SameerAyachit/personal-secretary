@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import time_machine
 
+import secretary.tools.events as events_tools
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import events as events_repo
@@ -146,3 +147,22 @@ def test_event_create_all_day_conflicts_with_timed_event():
             assert any(c["title"] == "holiday" for c in result["conflicts"])
         finally:
             conn.close()
+
+
+def test_event_create_queues_google_push_with_stable_id(monkeypatch):
+    monkeypatch.setattr(events_tools, "google_connected", lambda: True)
+    conn = _conn()
+    try:
+        out = event_create(
+            conn, "t-push", {"title": "Dentist", "when_text": "tomorrow at 5pm", "tz": "Asia/Kolkata"}
+        )
+        assert out["google"] == "queued"
+        row = events_repo.list_pending(conn)[0]
+        assert row["title"] == "Dentist" and len(row["google_event_id"]) == 32
+        monkeypatch.setattr(events_tools, "google_connected", lambda: False)
+        out2 = event_create(
+            conn, "t-push2", {"title": "Gym", "when_text": "tomorrow at 7am", "tz": "Asia/Kolkata"}
+        )
+        assert out2["google"] == "not_connected"
+    finally:
+        conn.close()

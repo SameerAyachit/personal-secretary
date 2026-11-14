@@ -23,9 +23,11 @@ from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QThread
 
-from secretary.integrations.google.calendar import sync_calendar
+from secretary.config import load_config
+from secretary.integrations.google.calendar import push_pending_events, sync_calendar
 from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
+from secretary.store.repos import events as events_repo
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
@@ -182,6 +184,57 @@ def _timezone_banner_step(conn: Connection, notifier) -> None:
         )
 
 
+def _sync_due(conn: Connection, sync_minutes: int) -> bool:
+    last = settings_repo.get(conn, "google_last_sync")
+    if not last:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return now_utc() - last_dt >= timedelta(minutes=sync_minutes)
+
+
+def _record_calendar_failure(conn: Connection, exc: Exception) -> None:
+    settings_repo.set(conn, "google_sync_failed", "1", turn_id="google-sync")
+    settings_repo.set(conn, "google_sync_error", str(exc), turn_id="google-sync")
+
+
+def _calendar_step(conn: Connection, calendar_client, on_events_changed) -> None:
+    """Push pending local events, then read-sync if due. Failures are recorded
+    for the Settings sync chip and never stop the tick."""
+    changed = False
+    try:
+        if events_repo.list_pending(conn):
+            changed = push_pending_events(conn, calendar_client) > 0
+    except Exception as exc:
+        logger.exception("scheduler calendar push failed")
+        _record_calendar_failure(conn, exc)
+    try:
+        if _sync_due(conn, load_config().google.sync_minutes):
+            result = sync_calendar(conn, calendar_client, "primary")
+            logger.info(
+                "scheduler calendar sync: synced=%d deleted=%d",
+                result.get("synced", 0),
+                result.get("deleted", 0),
+            )
+            settings_repo.set(
+                conn,
+                "google_last_sync",
+                datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                turn_id="google-sync",
+            )
+            changed = changed or bool(result.get("synced") or result.get("deleted"))
+    except Exception as exc:
+        logger.exception("scheduler calendar sync failed")
+        _record_calendar_failure(conn, exc)
+    if changed and on_events_changed is not None:
+        try:
+            on_events_changed()
+        except Exception:
+            logger.exception("scheduler events-changed callback failed")
+
+
 def tick(
     conn: Connection,
     on_fired=None,
@@ -189,6 +242,7 @@ def tick(
     calendar_client=None,
     classify=None,
     notifier=None,
+    on_events_changed=None,
 ) -> None:
     """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper,
     the Gmail triage job (plan §13.4), Calendar sync (plan §13), and the
@@ -230,21 +284,10 @@ def tick(
             )
     except Exception:
         logger.exception("scheduler triage job failed")
-    # Calendar sync: windowed sync with nextSyncToken (plan §13).
-    # Runs on connect and every tick; failures are logged, never fatal.
+    # Calendar: push locally created events first (only when some are pending),
+    # then read-sync at most every google.sync_minutes.
     if calendar_client is not None:
-        try:
-            result = sync_calendar(conn, calendar_client, "primary")
-            logger.info(
-                "scheduler calendar sync: synced=%d deleted=%d",
-                result.get("synced", 0),
-                result.get("deleted", 0),
-            )
-            settings_repo.set(conn, "google_last_sync", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), turn_id="google-sync")
-        except Exception as exc:
-            logger.exception("scheduler calendar sync failed")
-            settings_repo.set(conn, "google_sync_failed", "1", turn_id="google-sync")
-            settings_repo.set(conn, "google_sync_error", str(exc), turn_id="google-sync")
+        _calendar_step(conn, calendar_client, on_events_changed)
     # Timezone change banner (plan C-23): when the system time zone changes,
     # show an inbox item + toast. Runs on every tick; the stored value is
     # updated so the banner shows once per change.
@@ -266,8 +309,10 @@ class SchedulerThread(QThread):
         calendar_client=None,
         classify=None,
         notifier=None,
+        on_events_changed=None,
     ) -> None:
         super().__init__()
+        self._on_events_changed = on_events_changed
         self._conn = conn
         self._on_fired = on_fired
         self._gmail_client = gmail_client
@@ -285,6 +330,7 @@ class SchedulerThread(QThread):
                 calendar_client=self._calendar_client,
                 classify=self._classify,
                 notifier=self._notifier,
+                on_events_changed=self._on_events_changed,
             )
             # Sleep in small increments so stop() is responsive and shutdown is
             # deterministic (no 30 s wait stuck in msleep).
@@ -292,6 +338,11 @@ class SchedulerThread(QThread):
             while slept < TICK_SECONDS * 1000 and self._running:
                 self.msleep(100)
                 slept += 100
+
+    def set_google_clients(self, gmail_client, calendar_client) -> None:
+        """Swap in Google clients (e.g. right after the user connects Google)."""
+        self._gmail_client = gmail_client
+        self._calendar_client = calendar_client
 
     def stop(self) -> None:
         self._running = False

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import json
 import logging
 import signal
 import sys
@@ -21,9 +20,7 @@ from PySide6.QtNetwork import QLocalSocket
 
 from secretary.agent.router import Router
 from secretary.app import create_app
-from secretary.integrations.google.auth import GoogleAuth
-from secretary.integrations.google.calendar import CalendarClient
-from secretary.integrations.google.gmail import GmailClient
+from secretary.integrations.google.clients import build_clients
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.factory import build_llm
 from secretary.selftest import run_selftest
@@ -230,22 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         # Google clients (plan §13): real credentials are human-gated, so
         # clients are None until Google is connected. The Gmail client is
         # rebuilt when the user connects (Controller.rebuild_google_client).
-        gmail_client = None
-        calendar_client = None
-        if controller.get_google_connected() and credentials_path().exists():
-            try:
-                creds = json.loads(credentials_path().read_text(encoding="utf-8"))
-                installed = creds.get("installed") or creds.get("web") or {}
-                client_id = installed.get("client_id", "")
-                client_secret = installed.get("client_secret", "")
-                gmail_client = GmailClient(
-                    GoogleAuth(client_id, client_secret)
-                )
-                calendar_client = CalendarClient(
-                    GoogleAuth(client_id, client_secret)
-                )
-            except Exception as exc:  # never let Google clients break startup
-                logger.warning("Google clients unavailable: %s", exc)
+        gmail_client, calendar_client = build_clients(credentials_path())
         # Reminders that came due while the app was closed: one "While you were
         # away" inbox entry, before the scheduler starts firing (plan §10.4).
         try:
@@ -271,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             gmail_client=gmail_client,
             calendar_client=calendar_client,
             notifier=notifier,
+            on_events_changed=controller.events_changed.emit,
         )
         scheduler.start()
         controller.set_scheduler(scheduler)
