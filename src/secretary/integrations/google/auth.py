@@ -13,7 +13,7 @@ import time
 
 import httpx
 
-from secretary.secrets import delete_secret, get_secret, set_secret
+from secretary.secrets import get_secret
 
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REFRESH_TOKEN_KEY = "google_token"
@@ -44,12 +44,6 @@ class GoogleAuth:
     def load_refresh_token(self) -> str | None:
         """Return the stored refresh token, or None if Google isn't connected."""
         return get_secret(REFRESH_TOKEN_KEY)
-
-    def save_refresh_token(self, refresh_token: str) -> None:
-        set_secret(REFRESH_TOKEN_KEY, refresh_token)
-
-    def clear_refresh_token(self) -> None:
-        delete_secret(REFRESH_TOKEN_KEY)
 
     # ------------------------------------------------------------------ access token
 

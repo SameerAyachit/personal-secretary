@@ -29,6 +29,7 @@ from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import settings as settings_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
 
@@ -141,12 +142,7 @@ def _snooze_expiry(conn: sqlite3.Connection) -> None:
 
 def _sweeper(conn: sqlite3.Connection) -> None:
     """Expire pending_actions whose expires_at < now."""
-    now_iso = _utc_iso(now_utc())
-    conn.execute(
-        "UPDATE pending_actions SET status='expired', decided_at=? "
-        "WHERE status='waiting' AND expires_at < ?",
-        (now_iso, now_iso),
-    )
+    pa_repo.expire_waiting(conn, _utc_iso(now_utc()))
 
 
 def _tz_signature() -> str:

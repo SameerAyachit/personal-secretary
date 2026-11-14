@@ -7,8 +7,23 @@ owns the event loop and calls through ``run_coroutine_threadsafe``.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+
+def parse_tool_args(value) -> dict:
+    """Tool-call arguments as a dict: accepts a dict or a JSON object string;
+    anything else (including malformed JSON) becomes ``{}``."""
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 @dataclass

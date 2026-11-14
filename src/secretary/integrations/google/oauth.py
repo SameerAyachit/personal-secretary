@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from secretary.integrations.google.auth import REFRESH_TOKEN_KEY
 from secretary.secrets import delete_secret, get_secret, set_secret
 
 AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -36,7 +37,6 @@ SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly "
     "https://www.googleapis.com/auth/gmail.compose"
 )
-REFRESH_TOKEN_KEY = "google_token"
 CLIENT_ID_KEY = "google_client_id"
 
 logger = logging.getLogger(__name__)

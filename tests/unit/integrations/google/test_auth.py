@@ -16,8 +16,6 @@ def _mock_token_route(respx_mock, status: int = 200, payload: dict | None = None
 def test_access_token_refreshes_once_then_caches(respx_mock, monkeypatch):
     store: dict[str, str] = {}
     monkeypatch.setattr(auth_module, "get_secret", store.get)
-    monkeypatch.setattr(auth_module, "set_secret", store.__setitem__)
-    monkeypatch.setattr(auth_module, "delete_secret", store.pop)
     store["google_token"] = "refresh-123"
 
     _mock_token_route(respx_mock, payload={"access_token": "at-1", "expires_in": 3600})
@@ -29,8 +27,6 @@ def test_access_token_refreshes_once_then_caches(respx_mock, monkeypatch):
 
 def test_access_token_refreshes_after_expiry(respx_mock, monkeypatch):
     monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
 
 
     route = _mock_token_route(respx_mock, payload={"access_token": "at-1", "expires_in": 3600})
@@ -43,8 +39,6 @@ def test_access_token_refreshes_after_expiry(respx_mock, monkeypatch):
 
 def test_no_refresh_token_raises(respx_mock, monkeypatch):
     monkeypatch.setattr(auth_module, "get_secret", lambda key: None)
-    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
     route = _mock_token_route(respx_mock)
 
 
@@ -60,8 +54,6 @@ def test_no_refresh_token_raises(respx_mock, monkeypatch):
 
 def test_refresh_failure_raises(respx_mock, monkeypatch):
     monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
     _mock_token_route(respx_mock, status=400, payload={"error": "invalid_grant"})
 
 
@@ -72,17 +64,3 @@ def test_refresh_failure_raises(respx_mock, monkeypatch):
         pass
     else:  # pragma: no cover - defensive
         raise AssertionError("expected GoogleAuthError")
-
-
-def test_save_and_load_refresh_token(monkeypatch):
-    store: dict[str, str] = {}
-    monkeypatch.setattr(auth_module, "get_secret", store.get)
-    monkeypatch.setattr(auth_module, "set_secret", store.__setitem__)
-    monkeypatch.setattr(auth_module, "delete_secret", store.pop)
-
-    auth = GoogleAuth("cid", "secret")
-    assert auth.load_refresh_token() is None
-    auth.save_refresh_token("rt-abc")
-    assert auth.load_refresh_token() == "rt-abc"
-    auth.clear_refresh_token()
-    assert auth.load_refresh_token() is None

@@ -9,12 +9,12 @@ as missed and skipped.
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from secretary.store.db import Connection
 from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import pending_actions as pa_repo
 from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
 
 MISSED_HOURS = 24
@@ -99,14 +99,5 @@ def catch_up(conn: Connection, tz_name: str = "Asia/Kolkata") -> dict:
         )
 
     # Sweeper: expire pending actions.
-    _sweeper(conn)
+    pa_repo.expire_waiting(conn, now_iso)
     return {"count": len(titles), "titles": titles}
-
-
-def _sweeper(conn: sqlite3.Connection) -> None:
-    now_iso = _utc_iso(now_utc())
-    conn.execute(
-        "UPDATE pending_actions SET status='expired', decided_at=? "
-        "WHERE status='waiting' AND expires_at < ?",
-        (now_iso, now_iso),
-    )

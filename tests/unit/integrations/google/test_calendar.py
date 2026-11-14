@@ -42,8 +42,6 @@ def _full_sync_page(items, next_page_token=None, next_sync_token="tok-1"):
 
 def test_full_sync_upserts_events_and_saves_token(respx_mock, monkeypatch):
     monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
     respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
         return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
     )
@@ -112,8 +110,6 @@ def test_incremental_sync_uses_token_and_soft_deletes(respx_mock, monkeypatch):
         settings_repo.set(conn, "google_sync_token", "tok-1", turn_id="google-sync")
 
         monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
         respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
         )
@@ -179,8 +175,6 @@ def test_sync_410_triggers_full_resync(respx_mock, monkeypatch):
         settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
 
         monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
         respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
         )
@@ -239,8 +233,6 @@ def test_sync_410_persists_after_retry(respx_mock, monkeypatch):
     try:
         settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
         monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
         respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
         )
@@ -264,8 +256,6 @@ def test_sync_skips_unchanged_etag(respx_mock, monkeypatch):
     conn = _conn()
     try:
         monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
         respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
         )
@@ -307,8 +297,6 @@ def test_sync_failure_recorded(respx_mock, monkeypatch):
     try:
         settings_repo.set(conn, "google_sync_token", "tok-old", turn_id="s")
         monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-        monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-        monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
         respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
             return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
         )
@@ -332,8 +320,6 @@ def test_sync_failure_recorded(respx_mock, monkeypatch):
 
 def _oauth_and_time_window(respx_mock, monkeypatch):
     monkeypatch.setattr(auth_module, "get_secret", lambda key: "refresh-123")
-    monkeypatch.setattr(auth_module, "set_secret", lambda key, value: None)
-    monkeypatch.setattr(auth_module, "delete_secret", lambda key: None)
     respx_mock.post(auth_module.TOKEN_ENDPOINT).mock(
         return_value=httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600})
     )

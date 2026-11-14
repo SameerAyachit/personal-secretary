@@ -12,6 +12,13 @@ ruff ✓ | pytest 118 passed ✓ | lint-imports 7 kept/0 broken ✓ | --diagnose
 ## Phase 2 — DONE (committed)
 P2-01 scheduler, P2-02 inbox, P2-03 notifier, P2-04 catchup, P2-05 today/approvals, P2-06 hotkey/quick-capture, P2-07 onboarding wizard, P2-08 autostart/--minimized, P2-09 installer (DONE-HUMAN-GATED).
 
+## Audit correction (2026-11-14)
+The "Phase 2 — DONE" line above overstated three items. They had code and tests but were never wired into the running app:
+- P2-04 catch-up: now runs at startup (`__main__`), before the scheduler starts.
+- P2-06 hotkey/quick-capture: rewritten with ctypes (the pywin32 version never registered); wired in `__main__`.
+- P2-07 onboarding wizard: never shown anywhere; deleted (users configure AI in Settings > AI).
+Also fixed: unique turn ids, 0=disabled limiter, single tray icon, popup actions, Google Calendar write-back (ADR-003).
+
 ## Current session (2026-11-08) — startup-failure fixes before Phase 3+
 1. src/secretary/integrations/search/provider.py: SearchCache now uses Connection.write() (BEGIN IMMEDIATE/COMMIT under writer lock) instead of bare COMMIT on an isolation_level=None connection. Reproduced `python -m secretary` crash: sqlite3.OperationalError cannot commit - no transaction is active (provider.py:100, reached __main__.py:89). Fixed; main window now opens (ran app offscreen 7s, no traceback).
 2. src/secretary/logging_setup.py: next startup error — logging.getLogger().addHandler(RedactionFilter()) crashed callHandlers (Filter has no .level). Changed to addFilter().

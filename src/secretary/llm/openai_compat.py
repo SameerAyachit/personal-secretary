@@ -13,13 +13,12 @@ mismatch errors when turns are submitted from the Qt thread.
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
 import httpx
 
-from .base import LLMClient, LLMResponse, ToolCall
+from .base import LLMClient, LLMResponse, ToolCall, parse_tool_args
 from .errors import ProviderUnavailable, RequestTooLarge
 
 _CHAT_PATH = "/chat/completions"
@@ -127,7 +126,7 @@ class OpenAICompatClient(LLMClient):
                 ToolCall(
                     call_id=tc.get("id", ""),
                     name=fn.get("name", ""),
-                    args=self._parse_args(fn.get("arguments")),
+                    args=parse_tool_args(fn.get("arguments")),
                 )
             )
         usage = data.get("usage", {}) or {}
@@ -144,15 +143,3 @@ class OpenAICompatClient(LLMClient):
             latency_ms=latency_ms,
             finish_reason=choice.get("finish_reason", "") or "",
         )
-
-    @staticmethod
-    def _parse_args(value: Any) -> dict:
-        if isinstance(value, dict):
-            return dict(value)
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-                return parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-        return {}

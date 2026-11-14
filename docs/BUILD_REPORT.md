@@ -39,7 +39,7 @@ complete with fakes; real-world check needs the human), `BLOCKED` (none).
 | P2-04 | DONE | `src/secretary/scheduler/catchup.py` (groups missed reminders into one inbox entry); `tests/scheduler/test_catchup.py` → 3 tests passed. |
 | P2-05 | DONE | Today view, Approvals view shell, sweeper runs each tick; wired into `MainWindow`. |
 | P2-06 | DONE | `src/secretary/hotkey.py` (HotkeyFilter native event filter), `src/secretary/ui/quick_capture.py`, `__main__.py` wiring. |
-| P2-07 | DONE | `src/secretary/ui/views/onboarding.py` (first-run wizard + Test connection); controller `set_llm_provider`/`test_llm_connection`/`save_general`. |
+| P2-07 | REMOVED | First-run wizard was never wired into the app and was deleted on 2026-11-14; AI setup lives in Settings > AI (`set_llm_provider`/`test_llm_connection`). |
 | P2-08 | DONE | `--minimized` flag works; Run-key autostart written by `packaging/installer.iss` (HKCU). Settings toggle UI deferred to Phase 5. |
 | P2-09 | DONE-HUMAN-GATED | Installer spec + Inno script exist; PyInstaller exe builds. Clean-profile install + Inno build needs human. |
 | Phase 3 | PARTIAL | `src/secretary/store/repos/events.py` + `ui/views/events.py` built. Google Calendar sync (OAuth, sync tokens) HUMAN-GATED (needs Google Cloud project). `plan_day` / `event_create` not yet built (code-buildable, deferred). |

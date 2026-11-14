@@ -64,3 +64,13 @@ def decide(
         return False
     action_log(con, turn_id, status, "pending_action", pending_id, {"result": result_json})
     return True
+
+
+def expire_waiting(con: sqlite3.Connection, now_iso: str) -> int:
+    """Expire waiting actions whose ``expires_at`` has passed; returns the count."""
+    cur = con.execute(
+        "UPDATE pending_actions SET status='expired', decided_at=? "
+        "WHERE status='waiting' AND expires_at < ?",
+        (now_iso, now_iso),
+    )
+    return cur.rowcount

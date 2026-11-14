@@ -15,22 +15,10 @@ from __future__ import annotations
 import json
 import re
 
-from secretary.llm.base import LLMResponse, ToolCall
+from secretary.llm.base import LLMResponse, ToolCall, parse_tool_args
 
 _FENCED = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL | re.IGNORECASE)
 _DECODER = json.JSONDecoder()
-
-
-def _parse_args(value) -> dict:
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
 
 
 def _candidate_objects(text: str) -> list:
@@ -91,7 +79,7 @@ def normalize_response(
             if not isinstance(item, dict):
                 continue
             name = item.get("name") or item.get("tool")
-            args = _parse_args(item.get("arguments", item.get("args", {})))
+            args = parse_tool_args(item.get("arguments", item.get("args", {})))
             call_id = item.get("id") or item.get("call_id") or ""
             if not name:
                 continue
