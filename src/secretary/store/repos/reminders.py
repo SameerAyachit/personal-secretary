@@ -113,3 +113,59 @@ def get_by_idempotency_key(con: sqlite3.Connection, key: str) -> dict | None:
     )
     row = cur.fetchone()
     return row_to_dict(cur, row) if row else None
+
+
+# --- firing (used by the scheduler tick and startup catch-up) ---------------
+
+
+def list_due(con: sqlite3.Connection, now_iso: str) -> list[dict]:
+    """Scheduled, non-cancelled reminders whose fire time has passed, oldest first."""
+    cur = con.execute(
+        "SELECT * FROM reminders WHERE deleted_at IS NULL AND status='scheduled' "
+        "AND next_fire_at IS NOT NULL AND next_fire_at <= ? ORDER BY next_fire_at",
+        (now_iso,),
+    )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def claim(con: sqlite3.Connection, reminder_id: int) -> bool:
+    """Transition scheduled -> firing exactly once; False if someone else got it."""
+    cur = con.execute(
+        "UPDATE reminders SET status='firing' WHERE id=? AND status='scheduled'",
+        (reminder_id,),
+    )
+    return cur.rowcount == 1
+
+
+def release_claim(con: sqlite3.Connection, reminder_id: int) -> None:
+    con.execute(
+        "UPDATE reminders SET status='scheduled' WHERE id=? AND status='firing'",
+        (reminder_id,),
+    )
+
+
+def record_run(
+    con: sqlite3.Connection, reminder_id: int, scheduled_for: str, fired_at: str
+) -> None:
+    """Record a fired run; UNIQUE(reminder_id, scheduled_for) guards double fires."""
+    con.execute(
+        "INSERT INTO reminder_runs(reminder_id, scheduled_for, fired_at, outcome) "
+        "VALUES(?,?,?,'fired')",
+        (reminder_id, scheduled_for, fired_at),
+    )
+
+
+def reschedule(
+    con: sqlite3.Connection, reminder_id: int, next_fire_at: str, now_iso: str
+) -> None:
+    con.execute(
+        "UPDATE reminders SET next_fire_at=?, status='scheduled', updated_at=? WHERE id=?",
+        (next_fire_at, now_iso, reminder_id),
+    )
+
+
+def mark_done(con: sqlite3.Connection, reminder_id: int, now_iso: str) -> None:
+    con.execute(
+        "UPDATE reminders SET status='done', updated_at=? WHERE id=?",
+        (now_iso, reminder_id),
+    )

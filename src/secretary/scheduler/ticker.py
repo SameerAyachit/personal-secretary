@@ -14,24 +14,23 @@ next start — nothing is lost (plan §10.2).
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QThread
 
 from secretary.config import load_config
 from secretary.integrations.google.calendar import push_pending_events, sync_calendar
+from secretary.scheduler.firing import advance, utc_iso
 from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import pending_actions as pa_repo
+from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import settings as settings_repo
-from secretary.timeparse.recurrence import RecurrenceRule, next_occurrence
 
 logger = logging.getLogger(__name__)
 
@@ -43,36 +42,17 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _utc_iso(dt: datetime) -> str:
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _fire_due(conn: sqlite3.Connection) -> list[dict]:
     """Fire all due reminders atomically. Returns the created inbox rows."""
-    now_iso = _utc_iso(now_utc())
-    due = conn.execute(
-        "SELECT * FROM reminders WHERE status='scheduled' AND next_fire_at IS NOT NULL "
-        "AND next_fire_at <= ? ORDER BY next_fire_at",
-        (now_iso,),
-    ).fetchall()
+    now = now_utc()
+    now_iso = utc_iso(now)
     created: list[dict] = []
-    for raw in due:
-        rem = raw
-        # Claim: transition scheduled -> firing, exactly once.
-        cur = conn.execute(
-            "UPDATE reminders SET status='firing' WHERE id=? AND status='scheduled'",
-            (rem["id"],),
-        )
-        if cur.rowcount == 0:
+    for rem in reminders_repo.list_due(conn, now_iso):
+        if not reminders_repo.claim(conn, rem["id"]):
             continue  # already claimed by another tick/process
         try:
-            # Record the run.
-            conn.execute(
-                "INSERT INTO reminder_runs(reminder_id, scheduled_for, fired_at, outcome) "
-                "VALUES(?,?,?,'fired')",
-                (rem["id"], rem["next_fire_at"], now_iso),
-            )
-            # Inbox row (source of truth; written before the toast).
+            reminders_repo.record_run(conn, rem["id"], rem["next_fire_at"], now_iso)
+            # Inbox row is the source of truth; written before the toast.
             inbox_id = inbox_repo.create(
                 conn,
                 kind="reminder",
@@ -81,32 +61,14 @@ def _fire_due(conn: sqlite3.Connection) -> list[dict]:
                 body=rem["body"],
                 turn_id=None,
             )
-            # Advance the series or mark done.
-            if rem["kind"] == "recurring" and rem["rule_json"]:
-                rule = RecurrenceRule(**json.loads(rem["rule_json"]))
-                tz = ZoneInfo(rem["tz"])
-                after_local = now_utc().astimezone(tz)
-                nxt = next_occurrence(rule, after_local, rem["tz"])
-                conn.execute(
-                    "UPDATE reminders SET next_fire_at=?, status='scheduled', updated_at=? WHERE id=?",
-                    (_utc_iso(nxt), now_iso, rem["id"]),
-                )
-            else:
-                conn.execute(
-                    "UPDATE reminders SET status='done', updated_at=? WHERE id=?",
-                    (now_iso, rem["id"]),
-                )
+            advance(conn, rem, now)
             created.append(
                 {"inbox_id": inbox_id, "reminder_id": rem["id"], "title": rem["title"], "body": rem["body"]}
             )
         except sqlite3.IntegrityError:
-            # A run already exists for this (reminder, scheduled_for) — release
-            # the 'firing' claim so the reminder is not stuck in 'firing'.
-            conn.execute(
-                "UPDATE reminders SET status='scheduled' WHERE id=? AND status='firing'",
-                (rem["id"],),
-            )
-            continue
+            # A run already exists for this (reminder, scheduled_for): release
+            # the claim so the reminder is not stuck in 'firing'.
+            reminders_repo.release_claim(conn, rem["id"])
     return created
 
 
@@ -116,7 +78,7 @@ def _repeat_alerts(conn: sqlite3.Connection) -> list[dict]:
     Returns the items that need a repeat notification so the caller can toast
     them. Each is marked repeat_sent=1 so it only repeats once.
     """
-    cutoff = _utc_iso(now_utc() - timedelta(minutes=REPEAT_ALERT_MINUTES))
+    cutoff = utc_iso(now_utc() - timedelta(minutes=REPEAT_ALERT_MINUTES))
     rows = conn.execute(
         "SELECT id, title, body FROM inbox WHERE kind='reminder' AND status='unacknowledged' "
         "AND repeat_sent=0 AND created_at <= ?",
@@ -132,7 +94,7 @@ def _repeat_alerts(conn: sqlite3.Connection) -> list[dict]:
 
 def _snooze_expiry(conn: sqlite3.Connection) -> None:
     """Snoozed items whose snoozed_until <= now -> back to unacknowledged."""
-    now_iso = _utc_iso(now_utc())
+    now_iso = utc_iso(now_utc())
     conn.execute(
         "UPDATE inbox SET status='unacknowledged', snoozed_until=NULL "
         "WHERE status='snoozed' AND snoozed_until IS NOT NULL AND snoozed_until <= ?",
@@ -142,7 +104,7 @@ def _snooze_expiry(conn: sqlite3.Connection) -> None:
 
 def _sweeper(conn: sqlite3.Connection) -> None:
     """Expire pending_actions whose expires_at < now."""
-    pa_repo.expire_waiting(conn, _utc_iso(now_utc()))
+    pa_repo.expire_waiting(conn, utc_iso(now_utc()))
 
 
 def _tz_signature() -> str:

@@ -14,6 +14,10 @@
 - Tests: 193 passed; import-linter 7 kept, 0 broken; FakeLLM eval 100%.
 
 ### Fixed
+- Cancelled reminders still fired (and were counted by catch-up) because the due query ignored `deleted_at`.
+- Reminder/event/plan tools defaulted to Asia/Kolkata and let the model pick the timezone; they now use the configured timezone, which the agent loop pins and hides from the model.
+- Gmail triage passed the message id as the user id, so every message fetch returned 403.
+- Google OAuth now verifies the redirect `state`; the quick-add hotkey no longer needs pywin32.
 - Chat: turn ids were per-launch counters, so the same reminder request in a new session was deduped against an old reminder and never fired; they are now unique.
 - Chat: Settings > AI save built a 1-token rate limiter when config limits were 0 ("meter disabled"); limits of 0 now mean no local limiter.
 - Chat: Send is disabled while a turn runs; errors render as error bubbles; provider tool schemas no longer carry non-standard keys.
