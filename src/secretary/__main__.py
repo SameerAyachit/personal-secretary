@@ -18,21 +18,12 @@ from ctypes import wintypes
 from PySide6.QtCore import QMetaObject, Qt
 from PySide6.QtNetwork import QLocalSocket
 
-from secretary.agent.router import Router
+from secretary.agent.wiring import build_registry_and_router
 from secretary.app import create_app
 from secretary.integrations.google.clients import build_clients
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.factory import build_llm
 from secretary.selftest import run_selftest
-from secretary.tools import email as email_tools
-from secretary.tools import events as events_tools
-from secretary.tools import memory as memory_tools
-from secretary.tools import planning as planning_tools
-from secretary.tools import registry as tools_registry
-from secretary.tools import reminders as reminders_tools
-from secretary.tools import research as research_tools
-from secretary.tools import search as search_tools
-from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
 
 from .config import load_config
@@ -64,45 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnose", action="store_true", help="run diagnostics and exit")
     parser.add_argument("--selftest", metavar="NAME", help="run a real-machine selftest (chat|reminder|google|google-live|notify|all)")
     return parser
-
-
-def build_registry_and_router() -> tuple[tools_registry.Registry, Router]:
-    """Build the tool registry and keyword router (plan A7).
-
-    Registers every tool and maps it to keyword triggers. Dead route names
-    (tasks_add, tasks_list) that never matched a real tool are dropped; the
-    real names (task_create, task_list) are used instead.
-    """
-    registry = tools_registry.Registry()
-    tasks_tools.register(registry)
-    email_tools.register(registry)
-    events_tools.register(registry)
-    planning_tools.register(registry)
-    reminders_tools.register(registry)
-    memory_tools.register(registry)
-    research_tools.register(registry)
-    search_tools.register(registry)
-    router = Router(registry)
-    router.route("task_create", ["task", "create", "add"])
-    router.route("task_list", ["task", "list", "show"])
-    router.route("reminder_create", ["remind", "reminder"])
-    router.route("reminder_list", ["reminder", "reminder", "list", "show"])
-    router.route("reminder_snooze", ["snooze", "reminder"])
-    router.route("reminder_cancel", ["cancel", "reminder", "delete"])
-    router.route("memory_remember", ["remember", "memory"])
-    router.route("memory_forget", ["forget", "memory"])
-    router.route("email_search", ["email", "mail", "inbox", "message", "unread"])
-    router.route("email_read", ["email", "mail", "message", "read"])
-    router.route("email_triage", ["triage", "email", "mail", "inbox"])
-    router.route("email_draft", ["draft", "email", "mail", "reply"])
-    router.route("email_send", ["send", "email"])
-    router.route("web_search", ["search", "web"])
-    router.route("event_create", ["event", "calendar", "meeting", "appointment"])
-    router.route("event_list", ["events", "calendar", "schedule", "agenda"])
-    router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
-    router.route("research_brief", ["research", "brief", "summarize"])
-    router.route("check_claims", ["check", "claims", "verify", "source"])
-    return registry, router
 
 
 def _install_quit_on_ctrl_c(app) -> None:

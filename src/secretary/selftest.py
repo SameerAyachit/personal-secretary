@@ -27,14 +27,13 @@ import httpx
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QApplication
 
-from secretary.agent.router import Router
+from secretary.agent.wiring import build_registry_and_router
 from secretary.app import WorkerThread
 from secretary.config import load_config
 from secretary.controller import Controller, get_active_llm_key
 from secretary.integrations.google.auth import GoogleAuth, GoogleAuthError
 from secretary.integrations.google.oauth import connected
-from secretary.llm.limiter import Limiter
-from secretary.llm.openai_compat import OpenAICompatClient
+from secretary.llm.factory import build_llm
 from secretary.notify.notifier import Notifier
 from secretary.paths import config_path, credentials_path, db_path
 from secretary.scheduler.ticker import SchedulerThread
@@ -42,14 +41,6 @@ from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import reminders as reminders_repo
-from secretary.tools import email as email_tools
-from secretary.tools import events as events_tools
-from secretary.tools import memory as memory_tools
-from secretary.tools import planning as planning_tools
-from secretary.tools import reminders as reminders_tools
-from secretary.tools import research as research_tools
-from secretary.tools import tasks as tasks_tools
-from secretary.tools.registry import Registry
 
 POLL = 0.05
 
@@ -120,33 +111,6 @@ class TurnSpy(QObject):
         self.replies.append(text)
 
 
-def _build_registry_router() -> tuple[Registry, Router]:
-    registry = Registry()
-    tasks_tools.register(registry)
-    email_tools.register(registry)
-    events_tools.register(registry)
-    planning_tools.register(registry)
-    reminders_tools.register(registry)
-    memory_tools.register(registry)
-    research_tools.register(registry)
-    router = Router(registry)
-    router.route("tasks_add", ["task", "create", "add", "remind"])
-    router.route("tasks_list", ["task", "list", "show", "remind"])
-    router.route("reminder_create", ["remind", "reminder"])
-    router.route("reminder_list", ["remind", "reminder", "list", "show"])
-    router.route("reminder_snooze", ["snooze", "reminder"])
-    router.route("reminder_cancel", ["cancel", "reminder", "delete"])
-    router.route("memory_remember", ["remember", "memory"])
-    router.route("memory_forget", ["forget", "memory"])
-    router.route("email_send", ["send", "email"])
-    router.route("web_search", ["search", "web"])
-    router.route("event_create", ["event", "calendar", "meeting", "appointment"])
-    router.route("event_list", ["events", "calendar", "schedule", "agenda"])
-    router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
-    router.route("research_brief", ["research", "brief", "summarize"])
-    return registry, router
-
-
 def _new_conn(data_root: Path) -> Connection:
     conn = Connection(db_path())
     migrate(conn._con, migrations_folder(), lambda: None)
@@ -154,15 +118,16 @@ def _new_conn(data_root: Path) -> Connection:
 
 
 def _build_controller(conn: Connection, submit_coro=None) -> tuple[Controller, dict]:
-    registry, router = _build_registry_router()
+    registry, router = build_registry_and_router()
     key = get_active_llm_key()
     if not key:
         raise RuntimeError("no LLM key configured in Credential Manager")
     cfg = load_config()
     provider = cfg.llm.active
     prov = cfg.llm.providers[provider]
-    llm = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model)
-    limiter = Limiter(rpm=60, tpm=6000, safety=0.7)
+    llm, limiter = build_llm(cfg, key)
+    if llm is None:
+        raise RuntimeError("LLM model not configured; pick one in Settings > AI")
     controller = Controller(
         conn,
         registry=registry,
@@ -179,7 +144,6 @@ def _build_controller(conn: Connection, submit_coro=None) -> tuple[Controller, d
         "service": "Secretary",
         "key_name": f"llm_api_key:{provider}",
         "key_length": len(key),
-        "key_prefix": key[:4],
         "placeholder": placeholder,
     }
     return controller, info

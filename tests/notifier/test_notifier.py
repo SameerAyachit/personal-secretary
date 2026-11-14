@@ -127,6 +127,10 @@ def test_notify_desktop_failure_still_returns_true(qapp):
     app = QApplication.instance()
     app.processEvents()
     assert shown == []
+    deadline = time.monotonic() + 3  # the toast runs on a background thread
+    while notifier._desktop_sync is not None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
     assert notifier._desktop_sync is None
     # No desktop backend: the popup is the fallback, shown for every notify.
     notifier.notify("again", "body")

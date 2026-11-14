@@ -146,7 +146,9 @@ def test_incremental_sync_uses_token_and_soft_deletes(respx_mock, monkeypatch):
         conn.close()
 
 
-def test_sync_requires_refresh_token(respx_mock):
+def test_sync_requires_refresh_token(respx_mock, monkeypatch):
+    # Explicit precondition: earlier tests may leave a token in the shared keyring.
+    monkeypatch.setattr(auth_module, "get_secret", lambda key: None)
     route = respx_mock.get(
         "https://www.googleapis.com/calendar/v3/calendars/primary/events"
     ).mock(return_value=httpx.Response(200, json={"items": []}))
