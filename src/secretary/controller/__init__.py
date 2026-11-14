@@ -765,7 +765,7 @@ class Controller(QObject):
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         dst = backups_dir() / f"secretary-{stamp}.db"
         backup(self.conn, dst)
-        prune_backups(backups_dir(), 7)
+        prune_backups(backups_dir(), load_config().backup.keep)
         return {"name": dst.name, "path": str(dst)}
 
     def restore_backup(self, backup_name: str) -> dict:

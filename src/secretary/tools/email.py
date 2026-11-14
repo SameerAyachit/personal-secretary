@@ -16,6 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from secretary.config import load_config
 from secretary.store.db import Connection
 from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
@@ -195,7 +196,7 @@ def email_send_prepare(conn: Connection, turn_id: str, args: dict) -> dict:
     draft = messages_repo.get(conn, draft_id)
     if draft is None or draft.get("source") != "draft":
         return {"error": "draft not found"}
-    expires_at = (datetime.now(UTC) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    expires_at = (datetime.now(UTC) + timedelta(hours=load_config().pending_actions.email_send_ttl_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "draft_ref": parsed.draft_ref,
         "to": draft["to_addrs"],

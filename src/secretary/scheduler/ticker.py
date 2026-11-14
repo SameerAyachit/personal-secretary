@@ -35,7 +35,6 @@ from secretary.store.repos import settings as settings_repo
 logger = logging.getLogger(__name__)
 
 TICK_SECONDS = 30
-REPEAT_ALERT_MINUTES = 10
 
 
 def now_utc() -> datetime:
@@ -78,7 +77,7 @@ def _repeat_alerts(conn: sqlite3.Connection) -> list[dict]:
     Returns the items that need a repeat notification so the caller can toast
     them. Each is marked repeat_sent=1 so it only repeats once.
     """
-    cutoff = utc_iso(now_utc() - timedelta(minutes=REPEAT_ALERT_MINUTES))
+    cutoff = utc_iso(now_utc() - timedelta(minutes=load_config().notifications.repeat_after_minutes))
     rows = conn.execute(
         "SELECT id, title, body FROM inbox WHERE kind='reminder' AND status='unacknowledged' "
         "AND repeat_sent=0 AND created_at <= ?",
@@ -170,7 +169,14 @@ def _calendar_step(conn: Connection, calendar_client, on_events_changed) -> None
         _record_calendar_failure(conn, exc)
     try:
         if _sync_due(conn, load_config().google.sync_minutes):
-            result = sync_calendar(conn, calendar_client, "primary")
+            google_cfg = load_config().google
+            result = sync_calendar(
+                conn,
+                calendar_client,
+                "primary",
+                window_past_days=google_cfg.window_past_days,
+                window_future_days=google_cfg.window_future_days,
+            )
             logger.info(
                 "scheduler calendar sync: synced=%d deleted=%d",
                 result.get("synced", 0),

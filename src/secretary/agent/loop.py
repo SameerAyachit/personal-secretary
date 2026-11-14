@@ -99,7 +99,7 @@ async def _execute_call(
         # so they can store a snapshot for payload re-verification at execution.
         if spec.fn is not None:
             return spec.fn(conn, turn_id, args)
-        expires_at = (datetime.now(UTC) + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expires_at = (datetime.now(UTC) + timedelta(hours=load_config().pending_actions.default_ttl_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
         summary = f"{call.name}: {json.dumps(args)[:120]}"
         pa_repo.create(
             conn,
@@ -180,7 +180,7 @@ async def run_turn(
             messages=messages,
             tools=tool_schemas,
             max_tokens=max_tokens,
-            temperature=0.1,
+            temperature=cfg.llm.temperature_tools,
             purpose="tool",
         )
         if limiter is not None:

@@ -1,5 +1,6 @@
 """Tests for agent/loop.py: scripted conversations and loop guards (plan §8.1)."""
 
+import copy
 import json
 import sqlite3
 import tempfile
@@ -8,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
+import secretary.agent.loop as loop_module
 from secretary.agent.loop import MAX_STEPS, run_turn
 from secretary.agent.router import Router
+from secretary.config import _DEFAULTS, Config
 from secretary.llm.base import LLMResponse, ToolCall
 from secretary.llm.fake import FakeLLM
 from secretary.llm.limiter import Limiter
@@ -157,3 +160,22 @@ def test_idempotency_key_stable():
     k1 = idempotency_key("turn-1", "task_create", {"title": "x"})
     k2 = idempotency_key("turn-1", "task_create", {"title": "x"})
     assert k1 == k2
+
+
+@pytest.mark.asyncio
+async def test_config_output_budget_and_temperature_reach_the_provider(monkeypatch):
+    """R3: max_output_tokens/temperature come from config; no limiter is fine (limits 0)."""
+    cfg = Config.model_validate(copy.deepcopy(_DEFAULTS))
+    cfg.llm.max_output_tokens = 1234
+    cfg.llm.temperature_tools = 0.5
+    monkeypatch.setattr(loop_module, "load_config", lambda path=None: cfg)
+    conn = _conn()
+    try:
+        registry, router, _limiter = _build_dependencies(conn)
+        llm = _fake_llm([LLMResponse(text="hello there", tool_calls=[], usage={}, headers={}, model="fake")])
+        out = await run_turn("hey", {"turn_id": "t"}, llm, None, router, registry, conn)
+        assert out == "hello there"
+        assert llm.calls[0]["max_tokens"] == 1234
+        assert llm.calls[0]["temperature"] == 0.5
+    finally:
+        conn.close()
