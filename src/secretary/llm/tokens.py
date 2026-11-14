@@ -33,3 +33,12 @@ def count_tokens(text: str) -> int:
     if enc is not None:
         return len(enc.encode(text))
     return max(0, len(text) // 3)
+
+
+def truncate_tokens(text: str, max_tokens: int) -> str:
+    """The first ``max_tokens`` tokens of ``text`` (same fallback estimate as above)."""
+    enc = _ENCODING
+    if enc is not None:
+        ids = enc.encode(text)
+        return text if len(ids) <= max_tokens else enc.decode(ids[:max_tokens])
+    return text[: max_tokens * 3]

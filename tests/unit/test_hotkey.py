@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import ctypes
 
+import pytest
+
 import secretary.hotkey as hotkey_module
 from secretary.hotkey import (
     MOD_ALT,
     MOD_CONTROL,
     MOD_NOREPEAT,
+    MOD_SHIFT,
+    MOD_WIN,
     MSG,
     WM_HOTKEY,
     GlobalHotkey,
     HotkeyFilter,
+    parse_hotkey,
 )
 
 
@@ -61,3 +66,16 @@ def test_hotkey_press_fires_callback_exactly_once(monkeypatch):
     # A different hotkey id or message type is ignored.
     assert flt.nativeEventFilter(b"windows_generic_MSG", _message(hk.id + 1))[0] is False
     assert fired == [1]
+
+
+def test_parse_hotkey_default_and_variants():
+    assert parse_hotkey("Ctrl+Alt+Space") == (MOD_CONTROL | MOD_ALT, 0x20)
+    assert parse_hotkey("ctrl + shift + k") == (MOD_CONTROL | MOD_SHIFT, ord("K"))
+    assert parse_hotkey("Win+Alt+F9") == (MOD_WIN | MOD_ALT, 0x78)
+    assert parse_hotkey("Ctrl+Alt+5") == (MOD_CONTROL | MOD_ALT, ord("5"))
+
+
+def test_parse_hotkey_rejects_bad_input():
+    for bad in ("", "Space", "Ctrl+", "Ctrl+Alt+Banana", "Ctrl+Alt+A+B"):
+        with pytest.raises(ValueError):
+            parse_hotkey(bad)

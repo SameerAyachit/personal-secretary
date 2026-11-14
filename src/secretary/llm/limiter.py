@@ -20,8 +20,13 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 
-from .errors import RequestTooLarge
+from .errors import DailyLimitReached, RequestTooLarge
+
+
+def _utc_today() -> date:
+    return datetime.now(UTC).date()
 
 
 class Limiter:
@@ -33,9 +38,20 @@ class Limiter:
         tpm: float,
         safety: float = 0.7,
         clock: Callable[[], float] = time.monotonic,
+        *,
+        rpd: int = 0,
+        tpd: int = 0,
+        today: Callable[[], date] = _utc_today,
     ) -> None:
+        # A value of 0 switches that meter off (plan §6.2: unknown limits are 0).
         self.rpm_cap = rpm * safety
         self.tpm_cap = tpm * safety
+        self.rpd_cap = rpd * safety
+        self.tpd_cap = tpd * safety
+        self._today = today
+        self._day = today()
+        self._day_requests = 0
+        self._day_tokens = 0
         self.req_tokens = self.rpm_cap
         self.tok_tokens = self.tpm_cap
         self.last = clock()
@@ -52,12 +68,27 @@ class Limiter:
         self.tok_tokens = min(self.tpm_cap, self.tok_tokens + dt * self.tpm_cap / 60)
 
     def _wait_for(self, est_tokens: int) -> float:
-        """Seconds until the bucket fits ``est_tokens``."""
-        return max(
-            (1 - self.req_tokens) * 60 / self.rpm_cap,
-            (est_tokens - self.tok_tokens) * 60 / self.tpm_cap,
-            0.25,
-        )
+        """Seconds until the enabled minute buckets fit ``est_tokens``."""
+        waits = [0.25]
+        if self.rpm_cap > 0:
+            waits.append((1 - self.req_tokens) * 60 / self.rpm_cap)
+        if self.tpm_cap > 0:
+            waits.append((est_tokens - self.tok_tokens) * 60 / self.tpm_cap)
+        return max(waits)
+
+    def _roll_day(self) -> None:
+        today = self._today()
+        if today != self._day:
+            self._day = today
+            self._day_requests = 0
+            self._day_tokens = 0
+
+    def _check_daily(self, est_tokens: int) -> None:
+        self._roll_day()
+        if self.rpd_cap > 0 and self._day_requests + 1 > self.rpd_cap:
+            raise DailyLimitReached("The daily request limit for the AI provider is used up.")
+        if self.tpd_cap > 0 and self._day_tokens + est_tokens > self.tpd_cap:
+            raise DailyLimitReached("The daily token limit for the AI provider is used up.")
 
     async def acquire(
         self,
@@ -75,13 +106,16 @@ class Limiter:
         Raises :class:`RequestTooLarge` if ``est_tokens`` exceeds the whole
         token bucket (concern C-9).
         """
-        if est_tokens > self.tpm_cap:
+        if self.tpm_cap > 0 and est_tokens > self.tpm_cap:
             raise RequestTooLarge(
                 f"estimated {est_tokens} tokens exceeds the whole bucket ({self.tpm_cap:.0f})"
             )
+        self._check_daily(est_tokens)
         while True:
             self._refill()
-            if self.req_tokens >= 1 and self.tok_tokens >= est_tokens:
+            req_ok = self.rpm_cap <= 0 or self.req_tokens >= 1
+            tok_ok = self.tpm_cap <= 0 or self.tok_tokens >= est_tokens
+            if req_ok and tok_ok:
                 if (
                     priority == "background"
                     and self._waiting_interactive > 0
@@ -94,6 +128,8 @@ class Limiter:
                     continue
                 self.req_tokens -= 1
                 self.tok_tokens -= est_tokens
+                self._day_requests += 1
+                self._day_tokens += est_tokens
                 return
             wait = self._wait_for(est_tokens)
             if priority == "interactive":
@@ -114,7 +150,8 @@ class Limiter:
     ) -> None:
         """Correct the bucket after a call from actual usage and headers."""
         self.tok_tokens += est_tokens - used_tokens
-        if header_remaining is not None:
+        self._day_tokens = max(0, self._day_tokens + used_tokens - est_tokens)
+        if header_remaining is not None and self.tpm_cap > 0:
             try:
                 remaining = int(header_remaining)
             except (TypeError, ValueError):

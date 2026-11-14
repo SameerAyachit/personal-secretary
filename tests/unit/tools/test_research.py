@@ -12,9 +12,10 @@ from secretary.integrations.fetch import FetchError
 from secretary.integrations.search.provider import SearchResult, SearchUnavailable
 from secretary.llm.base import LLMResponse
 from secretary.llm.fake import FakeLLM
+from secretary.llm.tokens import count_tokens
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
-from secretary.tools.research import check_claims, research_brief_tool
+from secretary.tools.research import ResearchBrief, check_claims, research_brief_tool
 
 
 def _conn():
@@ -207,3 +208,35 @@ async def test_check_claims_empty_sources_returns_empty():
 @pytest.mark.asyncio
 async def test_check_claims_no_sentences():
     assert await check_claims("", [{"url": "https://example.com/a"}], _ClaimLLM([0])) == ""
+
+
+@pytest.mark.asyncio
+async def test_page_text_is_truncated_to_tokens_per_source(monkeypatch):
+    seen: list[str] = []
+
+    async def fake_summarize(self, url, text):
+        seen.append(text)
+        return {"summary": "s", "claims": []}
+
+    monkeypatch.setattr(ResearchBrief, "_summarize", fake_summarize)
+    monkeypatch.setattr(
+        "secretary.tools.research.fetch_url", lambda url: {"url": url, "text": "word " * 5000}
+    )
+    pipeline = ResearchBrief(llm=None, search_provider=None, tokens_per_source=100, token_budget=10_000)
+    await pipeline._gather([{"url": "https://e.com/a", "title": "a"}])
+    assert count_tokens(seen[0]) <= 100
+
+
+@pytest.mark.asyncio
+async def test_token_budget_stops_further_sources(monkeypatch):
+    async def fake_summarize(self, url, text):
+        return {"summary": "s", "claims": []}
+
+    monkeypatch.setattr(ResearchBrief, "_summarize", fake_summarize)
+    monkeypatch.setattr(
+        "secretary.tools.research.fetch_url", lambda url: {"url": url, "text": "word " * 5000}
+    )
+    sources = [{"url": f"https://e.com/{i}", "title": str(i)} for i in range(4)]
+    pipeline = ResearchBrief(llm=None, search_provider=None, tokens_per_source=100, token_budget=250)
+    sourced = await pipeline._gather(sources)
+    assert len(sourced) == 2  # 100 + 100 fits, a third (300) would exceed 250

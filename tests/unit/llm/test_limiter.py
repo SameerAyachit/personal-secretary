@@ -1,10 +1,11 @@
 """Tests for llm/limiter.py: token-bucket rate limiter (plan §7.4)."""
 
 import asyncio
+from datetime import date
 
 import pytest
 
-from secretary.llm.errors import RequestTooLarge
+from secretary.llm.errors import DailyLimitReached, RequestTooLarge
 from secretary.llm.limiter import Limiter
 
 
@@ -117,3 +118,39 @@ async def test_interactive_served_before_background_when_both_wait(monkeypatch):
 
     await asyncio.gather(interactive(), background())
     assert order == ["interactive", "background"]
+
+
+# ---- daily meters (plan §7.4: optional rpd/tpd, 0 = off) ----------------------------
+
+
+def _daily(**kw):
+    day = [date(2026, 11, 14)]
+    lim = Limiter(
+        rpm=kw.pop("rpm", 0), tpm=kw.pop("tpm", 0), safety=1.0, today=lambda: day[0], **kw
+    )
+    return lim, day
+
+
+def test_daily_request_limit_raises_then_resets_next_day():
+    lim, day = _daily(rpd=2)
+    asyncio.run(lim.acquire(10))
+    asyncio.run(lim.acquire(10))
+    with pytest.raises(DailyLimitReached, match="daily"):
+        asyncio.run(lim.acquire(10))
+    day[0] = date(2026, 11, 15)
+    asyncio.run(lim.acquire(10))  # new day, counters reset
+
+
+def test_daily_token_limit_counts_estimates_and_reconciles():
+    lim, _ = _daily(tpd=100)
+    asyncio.run(lim.acquire(60))
+    lim.reconcile(used_tokens=20, est_tokens=60)  # actual usage was lower
+    asyncio.run(lim.acquire(70))  # 20 + 70 <= 100
+    with pytest.raises(DailyLimitReached):
+        asyncio.run(lim.acquire(20))
+
+
+def test_minute_buckets_off_when_zero():
+    lim, _ = _daily(rpd=5)  # rpm = tpm = 0: only the daily meter is active
+    asyncio.run(lim.acquire(50_000))
+    asyncio.run(lim.acquire(50_000))

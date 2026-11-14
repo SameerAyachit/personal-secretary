@@ -15,3 +15,10 @@ class ProviderUnavailable(LLMError):
 
 class AuthError(ProviderUnavailable):
     """The provider rejected the API key (HTTP 401/403)."""
+
+
+class DailyLimitReached(LLMError):
+    """The configured daily request/token budget (``rpd``/``tpd``) is used up.
+
+    Never waited out (the wait could be hours); the turn fails with a clear message.
+    """

@@ -21,9 +21,51 @@ logger = logging.getLogger(__name__)
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
 WM_HOTKEY = 0x0312
 _HOTKEY_ID = 0x5EC1
+
+
+_MODIFIERS = {
+    "ctrl": MOD_CONTROL,
+    "control": MOD_CONTROL,
+    "alt": MOD_ALT,
+    "shift": MOD_SHIFT,
+    "win": MOD_WIN,
+    "meta": MOD_WIN,
+    "super": MOD_WIN,
+}
+_NAMED_KEYS = {"space": 0x20, "enter": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B}
+DEFAULT_HOTKEY = "Ctrl+Alt+Space"
+
+
+def parse_hotkey(text: str) -> tuple[int, int]:
+    """``"Ctrl+Alt+Space"`` -> ``(modifier flags, virtual-key code)``.
+
+    Needs at least one modifier and exactly one key (a letter, digit, F1-F24 or
+    Space/Enter/Tab/Esc). Raises ``ValueError`` otherwise.
+    """
+    parts = [p.strip().lower() for p in text.split("+")]
+    if len(parts) < 2 or any(not p for p in parts):
+        raise ValueError(f"invalid hotkey {text!r}: expected e.g. 'Ctrl+Alt+Space'")
+    modifiers = 0
+    keys: list[int] = []
+    for part in parts:
+        if part in _MODIFIERS:
+            modifiers |= _MODIFIERS[part]
+        elif part in _NAMED_KEYS:
+            keys.append(_NAMED_KEYS[part])
+        elif len(part) == 1 and part.isalnum() and part.isascii():
+            keys.append(ord(part.upper()))
+        elif part[0] == "f" and part[1:].isdigit() and 1 <= int(part[1:]) <= 24:
+            keys.append(0x70 + int(part[1:]) - 1)
+        else:
+            raise ValueError(f"invalid hotkey {text!r}: unknown key {part!r}")
+    if not modifiers or len(keys) != 1:
+        raise ValueError(f"invalid hotkey {text!r}: need at least one modifier and exactly one key")
+    return modifiers, keys[0]
 
 
 class MSG(ctypes.Structure):

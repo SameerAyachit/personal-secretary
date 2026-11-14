@@ -30,7 +30,7 @@ from .config import load_config
 from .controller import Controller, get_active_llm_key
 from .diagnose import run_diagnose
 from .errors import install_excepthooks, install_reporter
-from .hotkey import MOD_ALT, MOD_CONTROL, GlobalHotkey, HotkeyFilter
+from .hotkey import DEFAULT_HOTKEY, GlobalHotkey, HotkeyFilter, parse_hotkey
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
 from .paths import backups_dir, config_path, credentials_path, db_path, logs_dir
@@ -166,9 +166,14 @@ def main(argv: list[str] | None = None) -> int:
 
         notifier.action_handler = on_popup_action
 
-        # Global hotkey for quick capture (Ctrl+Alt+Space).
+        # Global hotkey for quick capture (app.hotkey, default Ctrl+Alt+Space).
         quick_capture = QuickCapture(controller)
-        hotkey = GlobalHotkey(MOD_ALT | MOD_CONTROL, 0x20, quick_capture.show_window)
+        try:
+            hotkey_mods, hotkey_vk = parse_hotkey(cfg.app.hotkey)
+        except ValueError:
+            logger.warning("invalid app.hotkey %r; using %s", cfg.app.hotkey, DEFAULT_HOTKEY)
+            hotkey_mods, hotkey_vk = parse_hotkey(DEFAULT_HOTKEY)
+        hotkey = GlobalHotkey(hotkey_mods, hotkey_vk, quick_capture.show_window)
         hotkey_filter = HotkeyFilter(hotkey)
         app.app.installNativeEventFilter(hotkey_filter)
 

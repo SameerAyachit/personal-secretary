@@ -13,8 +13,14 @@
 - UI (Phase 5): Settings theme toggle (system/light/dark following Windows color scheme), Settings autostart Run-key toggle, Settings diagnostics button, empty states for all list views, screenshots for all views in light and dark.
 - Store: migration 005 (email_messages), migration 006 (triage_results).
 - Tests: 193 passed; import-linter 7 kept, 0 broken; FakeLLM eval 100%.
+- `app.hotkey` now sets the quick-capture hotkey (`parse_hotkey`; an invalid value falls back to Ctrl+Alt+Space with a warning).
+- `llm.limits` `rpd`/`tpd` are honoured as daily meters (plan section 7.4); a used-up day raises `DailyLimitReached` with a clear message instead of waiting. Minute buckets with a 0 limit are skipped.
+- `llm.reasoning_effort` (default `low`; `""` omits it) is sent to gpt-oss models only. Allowed values per the Groq reasoning docs: low, medium, high. Not yet verified live together with tool calls.
+- `research.tokens_per_source` truncates each page and `research.token_budget` caps total page text fed to the model.
+- `pending_actions.expired_retention_days`: the scheduler sweeper deletes expired actions older than that.
 
 ### Removed
+- `google.enabled` config key (never read; whether Google is connected is decided by the stored token).
 - Unused config keys `tokens.*`, `app.language`, `app.quiet_hours_*` (old config files still load).
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 

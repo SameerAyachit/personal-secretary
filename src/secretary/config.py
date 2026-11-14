@@ -28,6 +28,7 @@ _DEFAULTS: dict[str, Any] = {
         "max_output_tokens": 2048,
         "turn_timeout_seconds": 90,
         "temperature_tools": 0.1,
+        "reasoning_effort": "low",
         "providers": {
             "groq": {
                 "base_url": "https://api.groq.com/openai/v1",
@@ -71,7 +72,7 @@ _DEFAULTS: dict[str, Any] = {
         "max_llm_calls": 8,
         "token_budget": 20000,
     },
-    "google": {"enabled": False, "sync_minutes": 15, "window_past_days": 7, "window_future_days": 60},
+    "google": {"sync_minutes": 15, "window_past_days": 7, "window_future_days": 60},
 }
 
 
@@ -99,6 +100,8 @@ class LLM(BaseModel):
     max_output_tokens: int = 2048
     turn_timeout_seconds: int = 90
     temperature_tools: float = 0.1
+    # gpt-oss models only: "low" | "medium" | "high"; "" omits the parameter.
+    reasoning_effort: str = "low"
     providers: dict[str, _Provider] = {}
     limits: dict[str, _Limit] = {}
     model_config = ConfigDict(extra="ignore")
@@ -151,7 +154,6 @@ class Research(BaseModel):
 
 
 class Google(BaseModel):
-    enabled: bool = False
     sync_minutes: int = 15
     window_past_days: int = 7
     window_future_days: int = 60

@@ -32,3 +32,22 @@ def test_no_key_or_placeholder_model_gives_none():
     assert build_llm(_cfg(0, 0), None) == (None, None)
     assert build_llm(_cfg(0, 0, model="fake-1"), "k" * 30) == (None, None)
     assert build_llm(_cfg(0, 0, model=""), "k" * 30) == (None, None)
+
+
+def test_daily_limits_alone_build_a_limiter():
+    cfg = _cfg(0, 0)
+    cfg.llm.limits["groq_primary"].rpd = 1000
+    _llm, limiter = build_llm(cfg, "k" * 30)
+    assert limiter is not None
+
+
+def test_reasoning_effort_only_for_gpt_oss_models():
+    cfg = _cfg(0, 0)
+    cfg.llm.reasoning_effort = "low"
+    llm, _ = build_llm(cfg, "k" * 30)
+    assert llm.reasoning_effort == "low"
+    other, _ = build_llm(_cfg(0, 0, model="llama-3.3-70b-versatile"), "k" * 30)
+    assert other.reasoning_effort == ""
+    cfg.llm.reasoning_effort = ""
+    off, _ = build_llm(cfg, "k" * 30)
+    assert off.reasoning_effort == ""

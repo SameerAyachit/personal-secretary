@@ -22,10 +22,13 @@ from secretary.integrations.search.provider import (
     SearchUnavailable,
 )
 from secretary.llm.base import LLMClient
+from secretary.llm.tokens import count_tokens, truncate_tokens
 from secretary.tools.registry import SafetyClass, ToolSpec
 
 MAX_SOURCES = 4
 MAX_CALLS = 8
+TOKENS_PER_SOURCE = 1500
+TOKEN_BUDGET = 20000
 MAX_QUERIES = 4
 
 
@@ -102,11 +105,15 @@ class ResearchBrief:
         search_provider: SearchProvider,
         max_calls: int = MAX_CALLS,
         max_sources: int = MAX_SOURCES,
+        tokens_per_source: int = TOKENS_PER_SOURCE,
+        token_budget: int = TOKEN_BUDGET,
     ) -> None:
         self._llm = llm
         self._provider = search_provider
         self._max_calls = max_calls
         self._max_sources = max_sources
+        self._tokens_per_source = tokens_per_source
+        self._token_budget = token_budget
         self.calls = 0
 
     async def _chat(self, messages: list[dict], max_tokens: int = 400, temperature: float = 0.2, purpose: str = "research") -> str:
@@ -225,6 +232,24 @@ class ResearchBrief:
     async def _check_citations(self, brief: str, sourced: list[dict]) -> str:
         return await check_claims(brief, sourced, self._llm)
 
+    async def _gather(self, sources: list[dict]) -> list[dict]:
+        """Fetch and summarise each source within the per-source and total token limits."""
+        sourced: list[dict] = []
+        spent = 0
+        for source in sources:
+            try:
+                fetched = fetch_url(source["url"])
+            except FetchError:
+                continue
+            text = truncate_tokens(fetched.get("text", ""), self._tokens_per_source)
+            cost = count_tokens(text)
+            if spent + cost > self._token_budget:
+                break
+            spent += cost
+            summary = await self._summarize(source["url"], text)
+            sourced.append({**source, "summary": summary["summary"], "claims": summary["claims"]})
+        return sourced
+
     async def run(self, topic: str, depth: str = "standard") -> dict:
         queries = await self._plan_queries(topic)
         sources = self._search(queries)
@@ -237,14 +262,7 @@ class ResearchBrief:
                 "calls": self.calls,
                 "partial": True,
             }
-        sourced: list[dict] = []
-        for source in sources:
-            try:
-                fetched = fetch_url(source["url"])
-            except FetchError:
-                continue
-            summary = await self._summarize(source["url"], fetched.get("text", ""))
-            sourced.append({**source, "summary": summary["summary"], "claims": summary["claims"]})
+        sourced = await self._gather(sources)
         if not sourced:
             return {
                 "topic": topic,
@@ -279,6 +297,8 @@ async def research_brief_tool(conn: Any, turn_id: str, args: dict) -> dict:
         provider,
         max_calls=research_cfg.max_llm_calls,
         max_sources=research_cfg.max_sources,
+        tokens_per_source=research_cfg.tokens_per_source,
+        token_budget=research_cfg.token_budget,
     )
     return await pipeline.run(parsed.topic, parsed.depth)
 

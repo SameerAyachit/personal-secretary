@@ -184,3 +184,21 @@ async def test_auth_failure_raises_auth_error(status):
         finally:
             await client.aclose()
     assert issubclass(AuthError, ProviderUnavailable)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort,expected", [("low", "low"), ("", None)])
+async def test_reasoning_effort_is_sent_only_when_set(effort, expected):
+    with respx.mock:
+        route = respx.post(f"{BASE}/chat/completions").mock(
+            return_value=Response(200, json=_chat_response())
+        )
+        client = OpenAICompatClient(
+            base_url=BASE, api_key="k", model="openai/gpt-oss-120b", reasoning_effort=effort
+        )
+        try:
+            await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    sent = json.loads(route.calls.last.request.content)
+    assert sent.get("reasoning_effort") == expected

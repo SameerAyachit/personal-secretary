@@ -35,7 +35,9 @@ class OpenAICompatClient(LLMClient):
         api_key: str,
         model: str,
         timeout_seconds: float = 60.0,
+        reasoning_effort: str = "",
     ) -> None:
+        self.reasoning_effort = reasoning_effort
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
@@ -74,6 +76,9 @@ class OpenAICompatClient(LLMClient):
             "temperature": temperature,
             "stream": False,
         }
+        if self.reasoning_effort:
+            # gpt-oss on Groq: low | medium | high (Groq docs, "Reasoning").
+            body["reasoning_effort"] = self.reasoning_effort
         if tools:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
             body["tool_choice"] = tool_choice

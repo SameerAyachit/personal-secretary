@@ -74,3 +74,12 @@ def expire_waiting(con: sqlite3.Connection, now_iso: str) -> int:
         (now_iso, now_iso),
     )
     return cur.rowcount
+
+
+def purge_expired(con: sqlite3.Connection, older_than_iso: str) -> int:
+    """Delete actions that expired (never decided by the user) before ``older_than_iso``."""
+    cur = con.execute(
+        "DELETE FROM pending_actions WHERE status='expired' AND decided_at < ?",
+        (older_than_iso,),
+    )
+    return cur.rowcount

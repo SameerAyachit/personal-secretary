@@ -14,7 +14,7 @@ def test_load_config_returns_defaults(tmp_path, monkeypatch):
     assert cfg.llm.providers["groq"].base_url == "https://api.groq.com/openai/v1"
     assert cfg.llm.limits["groq_primary"].rpm == 0
     assert cfg.notifications.toast is True
-    assert cfg.google.enabled is False
+    assert cfg.google.sync_minutes == 15
 
 
 def test_load_config_merges_user_toml(tmp_path, monkeypatch):

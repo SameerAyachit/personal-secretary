@@ -102,8 +102,11 @@ def _snooze_expiry(conn: sqlite3.Connection) -> None:
 
 
 def _sweeper(conn: sqlite3.Connection) -> None:
-    """Expire pending_actions whose expires_at < now."""
-    pa_repo.expire_waiting(conn, utc_iso(now_utc()))
+    """Expire pending_actions whose expires_at < now; purge old expired ones."""
+    now = now_utc()
+    pa_repo.expire_waiting(conn, utc_iso(now))
+    retention = load_config().pending_actions.expired_retention_days
+    pa_repo.purge_expired(conn, utc_iso(now - timedelta(days=retention)))
 
 
 def _tz_signature() -> str:
