@@ -1,6 +1,7 @@
 """Popup reminder card: frameless, always-on-top, bottom-right (plan §10-11, C-6).
 
-A spike implementation for P0-04. The real reminder wiring is added in Phase 2.
+Buttons emit ``snooze``/``done`` and close the card; the Notifier maps them to
+inbox actions.
 """
 
 from __future__ import annotations
@@ -44,8 +45,8 @@ class PopupCard(QWidget):
         bar = QHBoxLayout()
         self._snooze_btn = QPushButton("Snooze")
         self._done_btn = QPushButton("Done")
-        self._snooze_btn.clicked.connect(self.snooze.emit)
-        self._done_btn.clicked.connect(self.done.emit)
+        self._snooze_btn.clicked.connect(self._on_snooze)
+        self._done_btn.clicked.connect(self._on_done)
         bar.addWidget(self._snooze_btn)
         bar.addWidget(self._done_btn)
         bar.addStretch()
@@ -59,9 +60,16 @@ class PopupCard(QWidget):
         self._timer.timeout.connect(self.close_popup)
         self._timer.start(self.AUTO_CLOSE_SECONDS * 1000)
 
+    def _on_snooze(self) -> None:
+        self.snooze.emit()
+        self.close()
+
+    def _on_done(self) -> None:
+        self.done.emit()
+        self.close()
+
     def show_popup(self) -> None:
         """Show the card, stacking below any already-visible cards."""
-        PopupCard._stack_offset += 1
         screen = QApplication.primaryScreen()
         geo = screen.availableGeometry() if screen else self.geometry()
         card_w = self.width()
@@ -69,12 +77,12 @@ class PopupCard(QWidget):
         # Stack cards vertically: each new card appears above the previous one.
         x = geo.right() - card_w - 16
         y = geo.bottom() - card_h - 16 - (PopupCard._stack_offset * (card_h + 12))
+        PopupCard._stack_offset += 1
         self.move(QPoint(x, y))
         self.show()
 
     def close_popup(self) -> None:
-        PopupCard._stack_offset = max(0, PopupCard._stack_offset - 1)
-        self.close()
+        self.close()  # closeEvent releases the stack slot exactly once
 
     def closeEvent(self, event):  # type: ignore[override]
         PopupCard._stack_offset = max(0, PopupCard._stack_offset - 1)

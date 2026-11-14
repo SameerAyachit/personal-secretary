@@ -37,7 +37,6 @@ from secretary.tools import research as research_tools
 from secretary.tools import search as search_tools
 from secretary.tools import tasks as tasks_tools
 from secretary.ui.quick_capture import QuickCapture
-from secretary.ui.tray import TrayIcon
 
 from .config import load_config
 from .controller import Controller, get_active_llm_key
@@ -46,10 +45,13 @@ from .errors import install_excepthooks, install_reporter
 from .hotkey import GlobalHotkey, HotkeyFilter
 from .logging_setup import setup_logging
 from .notify.notifier import Notifier
-from .paths import config_path, credentials_path, db_path
+from .paths import backups_dir, config_path, credentials_path, db_path
+from .scheduler.catchup import catch_up
 from .scheduler.ticker import SchedulerThread
+from .store.backup import backup_if_due
 from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
+from .store.repos import settings as settings_repo
 from .ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -202,8 +204,16 @@ def main(argv: list[str] | None = None) -> int:
         conn.search_provider = search_service
 
         # Notifier + tray for reminders.
-        tray = TrayIcon(window, controller)
-        notifier = Notifier(tray.tray_icon())
+        # MainWindow owns the single tray icon; reuse it for notifications.
+        notifier = Notifier(window.tray_icon())
+
+        def on_popup_action(kind: str, inbox_id: int) -> None:
+            if kind == "done":
+                controller.ack_inbox(inbox_id)
+            else:
+                controller.snooze_inbox(inbox_id, "10 minutes")
+
+        notifier.action_handler = on_popup_action
 
         # Global hotkey for quick capture (Ctrl+Alt+Space).
         quick_capture = QuickCapture(controller)
@@ -214,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         # Scheduler thread fires reminders into the inbox.
         def on_fired(entries):
             for entry in entries:
-                notifier.notify(entry["title"], entry["body"], priority=True)
+                notifier.notify(entry["title"], entry["body"], priority=True, inbox_id=entry.get("inbox_id"))
             controller.inbox_changed.emit()
 
         # Google clients (plan §13): real credentials are human-gated, so
@@ -236,6 +246,25 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except Exception as exc:  # never let Google clients break startup
                 logger.warning("Google clients unavailable: %s", exc)
+        # Reminders that came due while the app was closed: one "While you were
+        # away" inbox entry, before the scheduler starts firing (plan §10.4).
+        try:
+            away = conn.write(lambda con: catch_up(con, cfg.app.timezone or "UTC"))
+            if away["count"]:
+                notifier.notify("While you were away", f"{away['count']} reminder(s)", priority=True)
+        except Exception:
+            logger.exception("startup catch-up failed")
+        try:
+            backup_if_due(
+                conn,
+                backups_dir(),
+                cfg.backup.keep,
+                cfg.backup.min_hours_between,
+                lambda k: settings_repo.get(conn, k),
+                lambda k, v: settings_repo.set(conn, k, v, turn_id="backup"),
+            )
+        except Exception:
+            logger.exception("startup backup failed")
         scheduler = SchedulerThread(
             conn,
             on_fired=on_fired,

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
 MAX_VISIBLE = 5
 
@@ -28,8 +28,12 @@ class TrayIcon(QObject):
         self._window = window
         self._controller = controller
         self._tray = QSystemTrayIcon()
-        if QIcon.fromTheme("secretary").isNull():
-            self._tray.setIcon(QIcon())  # fallback until packaging icons exist
+        icon = QIcon.fromTheme("secretary")
+        if icon.isNull():
+            # A null icon is not shown on Windows (and showMessage fails), so
+            # use a built-in style icon until packaged icons exist.
+            icon = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
+        self._tray.setIcon(icon)
         self._tray.setToolTip("Secretary")
         self._menu = QMenu()
         self._tray.setContextMenu(self._menu)
@@ -87,8 +91,9 @@ class TrayIcon(QObject):
             self._window.show_window()
 
     def _quit(self) -> None:
-        # The controller owns the App; Quit is handled by the main loop.
-        pass
+        # Closing the window only hides to tray, so Quit must stop the loop.
+        self._tray.hide()
+        QApplication.quit()
 
     def show(self) -> None:
         self._tray.show()

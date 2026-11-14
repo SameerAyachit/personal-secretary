@@ -8,6 +8,7 @@ toast send itself is pumped onto a background thread because
 a minute when a reminder fired.
 """
 
+import gc
 import os
 import time
 
@@ -19,6 +20,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from secretary.notify.notifier import Notifier
+from secretary.notify.popup import PopupCard
 
 
 class _RecordingDesktop:
@@ -140,3 +142,20 @@ def test_set_tray_badge(qapp):
     tray.setToolTip.assert_called_once_with("Secretary (3 unread)")
     notifier.set_tray_badge(0)
     tray.setToolTip.assert_called_with("Secretary")
+
+
+def test_popup_buttons_reach_action_handler_and_card_survives_gc(qapp):
+    notifier = Notifier()
+    notifier._desktop_sync = None  # popup path only
+    seen: list[tuple[str, int]] = []
+    notifier.action_handler = lambda kind, inbox_id: seen.append((kind, inbox_id))
+    base = PopupCard._stack_offset
+    notifier.notify("Reminder", "drink water", priority=True, inbox_id=7)
+    qapp.processEvents()
+    gc.collect()
+    popups = list(notifier._popups)
+    assert len(popups) == 1 and popups[0].isVisible()
+    assert PopupCard._stack_offset == base + 1
+    popups[0]._done_btn.click()
+    assert seen == [("done", 7)]
+    assert PopupCard._stack_offset == base  # slot released exactly once
