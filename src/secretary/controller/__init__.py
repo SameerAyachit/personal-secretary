@@ -43,6 +43,7 @@ from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
 from secretary.secrets import delete_secret, get_secret, set_secret
 from secretary.store.backup import backup, list_backups, prune_backups, restore
 from secretary.store.db import Connection
+from secretary.store.repos import chat as chat_repo
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import facts as facts_repo
 from secretary.store.repos import inbox as inbox_repo
@@ -159,43 +160,19 @@ class Controller(QObject):
     # ------------------------------------------------------------------ Chat history
 
     def get_recent_chat_messages(self, limit: int = 8) -> list[dict]:
-        """Return recent user/assistant chat messages for turn context history.
-
-        Ordered oldest-first, suitable for passing as ``ctx["history"]`` to the
-        agent loop so the model can follow up on previous exchanges.
-        """
+        """Return recent user/assistant chat messages for turn context history,
+        oldest first, so the model can follow up on previous exchanges."""
         try:
-            rows = self.conn.execute(
-                "SELECT role, content FROM messages WHERE role IN ('user','assistant') "
-                "ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+            return chat_repo.recent_messages(self.conn, limit)
         except Exception:
             return []
 
     def _store_chat_message(self, role: str, content: str, turn_id: str | None = None) -> None:
-        """Persist one chat message to the conversations/messages table."""
+        """Persist one chat message (best-effort: history must never block a turn)."""
         try:
-            conv = self.conn.execute(
-                "SELECT id FROM conversations ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            if conv is None:
-                self.conn.execute(
-                    "INSERT INTO conversations(title, created_at) VALUES(?,?)",
-                    ("Chat", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
-                )
-                conv_id = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            else:
-                conv_id = conv[0]
-            self.conn.execute(
-                "INSERT INTO messages(conversation_id, role, content, turn_id, created_at) "
-                "VALUES(?,?,?,?,?)",
-                (conv_id, role, content, turn_id, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
-            )
+            chat_repo.add_message(self.conn, role, content, turn_id)
         except Exception:
-            # History is best-effort; a failure must never block a chat turn.
-            pass
+            logger.exception("could not store chat message")
 
     def list_pending_actions(self) -> list[dict]:
         """Return waiting class-C pending actions (for the Approvals view).

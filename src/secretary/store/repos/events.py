@@ -87,3 +87,17 @@ def set_sync_state(
         "UPDATE events SET sync_state=?, sync_error=?, etag=COALESCE(?, etag), updated_at=? WHERE id=?",
         (state, error, etag, now_utc(), event_id),
     )
+
+
+def get_by_google_id(con: sqlite3.Connection, google_event_id: str) -> dict | None:
+    cur = con.execute("SELECT * FROM events WHERE google_event_id=?", (google_event_id,))
+    row = cur.fetchone()
+    return row_to_dict(cur, row) if row else None
+
+
+def soft_delete_by_google_id(con: sqlite3.Connection, google_event_id: str) -> None:
+    now = now_utc()
+    con.execute(
+        "UPDATE events SET deleted_at=?, updated_at=? WHERE google_event_id=? AND deleted_at IS NULL",
+        (now, now, google_event_id),
+    )

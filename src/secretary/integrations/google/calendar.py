@@ -194,26 +194,15 @@ def _upsert_event(conn: Connection, item: dict, turn_id: str) -> str:
         "notes": item.get("description"),
         "etag": item.get("etag"),
     }
-    row = conn.execute("SELECT id, etag FROM events WHERE google_event_id=?", (google_event_id,)).fetchone()
+    row = events_repo.get_by_google_id(conn, google_event_id)
     if row:
         # Skip the write when the etag is unchanged (no-op sync for this event).
-        if row[1] is not None and row[1] == fields.get("etag"):
+        if row["etag"] is not None and row["etag"] == fields.get("etag"):
             return None
-        events_repo.update(conn, row[0], turn_id=turn_id, **fields)
-        return str(row[0])
+        events_repo.update(conn, row["id"], turn_id=turn_id, **fields)
+        return str(row["id"])
     fields["google_event_id"] = google_event_id
     return str(events_repo.create(conn, turn_id=turn_id, **fields))
-
-
-def _soft_delete(conn: Connection, google_event_id: str, turn_id: str) -> None:
-    conn.execute(
-        "UPDATE events SET deleted_at=?, updated_at=? WHERE google_event_id=? AND deleted_at IS NULL",
-        (_now_utc(), _now_utc(), google_event_id),
-    )
-
-
-def _now_utc() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def sync_calendar(
@@ -258,7 +247,7 @@ def sync_calendar(
                 continue
             for item in data.get("items", []) or []:
                 if item.get("status") == "deleted":
-                    _soft_delete(conn, item["id"], turn_id)
+                    events_repo.soft_delete_by_google_id(conn, item["id"])
                     deleted += 1
                 else:
                     result = _upsert_event(conn, item, turn_id)
