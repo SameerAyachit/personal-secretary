@@ -51,7 +51,7 @@ class _FakeGmailClient:
         self.list_calls += 1
         return {"messages": [{"id": m["id"]} for m in self._messages.values()]}
 
-    def get_message(self, message_id: str, format: str = "full") -> dict:
+    def get_message(self, user_id: str = "me", message_id: str = "", format: str = "full") -> dict:
         self.get_calls.append(message_id)
         msg = self._messages.get(message_id)
         if msg is None:
@@ -140,7 +140,7 @@ def test_sync_gmail_messages_get_failure_does_not_abort():
         _message("gm-2", "Two", "b@example.com", "Wed, 11 Nov 2026 09:00:00 +0000"),
     ])
 
-    def get_message(message_id: str, format: str = "full") -> dict:
+    def get_message(user_id: str = "me", message_id: str = "", format: str = "full") -> dict:
         if message_id == "gm-2":
             raise RuntimeError("boom")
         return gmail._messages[message_id]

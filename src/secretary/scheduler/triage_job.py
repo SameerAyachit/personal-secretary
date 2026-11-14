@@ -50,7 +50,7 @@ def sync_gmail_messages(
         if not google_id:
             continue
         try:
-            fetched.append(gmail_client.get_message(google_id, format="full"))
+            fetched.append(gmail_client.get_message(message_id=google_id, format="full"))
         except Exception as exc:  # one message must not abort the sync
             logger.warning("triage job: gmail get %s failed: %s", google_id, exc)
 
