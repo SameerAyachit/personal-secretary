@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from secretary.config import load_config
 from secretary.integrations.fetch import FetchError, fetch_url
 from secretary.integrations.search.provider import (
     DDGSSearchProvider,
@@ -95,10 +96,17 @@ async def check_claims(brief: str, sources: list[dict], llm) -> str:
 class ResearchBrief:
     """Stateful brief pipeline with an LLM call budget."""
 
-    def __init__(self, llm: LLMClient, search_provider: SearchProvider, max_calls: int = MAX_CALLS) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        search_provider: SearchProvider,
+        max_calls: int = MAX_CALLS,
+        max_sources: int = MAX_SOURCES,
+    ) -> None:
         self._llm = llm
         self._provider = search_provider
         self._max_calls = max_calls
+        self._max_sources = max_sources
         self.calls = 0
 
     async def _chat(self, messages: list[dict], max_tokens: int = 400, temperature: float = 0.2, purpose: str = "research") -> str:
@@ -139,7 +147,7 @@ class ResearchBrief:
         sources: list[dict] = []
         seen: set[str] = set()
         for query in queries:
-            if len(sources) >= MAX_SOURCES:
+            if len(sources) >= self._max_sources:
                 break
             try:
                 results = self._provider.search(query, n=3)
@@ -151,7 +159,7 @@ class ResearchBrief:
                 if url and url not in seen:
                     seen.add(url)
                     sources.append({"url": url, "title": title or url})
-                    if len(sources) >= MAX_SOURCES:
+                    if len(sources) >= self._max_sources:
                         break
         return sources
 
@@ -265,7 +273,13 @@ async def research_brief_tool(conn: Any, turn_id: str, args: dict) -> dict:
     llm = getattr(conn, "llm", None)
     if llm is None:
         return {"error": "LLM not configured; research brief requires an LLM provider."}
-    pipeline = ResearchBrief(llm, provider)
+    research_cfg = load_config().research
+    pipeline = ResearchBrief(
+        llm,
+        provider,
+        max_calls=research_cfg.max_llm_calls,
+        max_sources=research_cfg.max_sources,
+    )
     return await pipeline.run(parsed.topic, parsed.depth)
 
 

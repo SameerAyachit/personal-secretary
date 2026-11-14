@@ -17,13 +17,9 @@ from .paths import config_path, ensure_dirs
 _DEFAULTS: dict[str, Any] = {
     "app": {
         "timezone": "Asia/Kolkata",
-        "language": "en",
         "theme": "system",
         "start_minimized": True,
         "hotkey": "Ctrl+Alt+Space",
-        "quiet_hours_enabled": False,
-        "quiet_hours_start": "23:00",
-        "quiet_hours_end": "07:00",
     },
     "llm": {
         "active": "groq",
@@ -50,11 +46,6 @@ _DEFAULTS: dict[str, Any] = {
             "groq_primary": {"rpm": 0, "rpd": 0, "tpm": 0, "tpd": 0, "safety_factor": 0.7},
             "groq_fallback": {"rpm": 0, "rpd": 0, "tpm": 0, "tpd": 0, "safety_factor": 0.7},
         },
-    },
-    "tokens": {
-        "tool_schema_margin": 800,
-        "per_message_margin": 8,
-        "tool_result_budget": 800,
     },
     "notifications": {
         "toast": True,
@@ -115,20 +106,9 @@ class LLM(BaseModel):
 
 class App(BaseModel):
     timezone: str = "Asia/Kolkata"
-    language: str = "en"
     theme: str = "system"
     start_minimized: bool = True
     hotkey: str = "Ctrl+Alt+Space"
-    quiet_hours_enabled: bool = False
-    quiet_hours_start: str = "23:00"
-    quiet_hours_end: str = "07:00"
-    model_config = ConfigDict(extra="ignore")
-
-
-class Tokens(BaseModel):
-    tool_schema_margin: int = 800
-    per_message_margin: int = 8
-    tool_result_budget: int = 800
     model_config = ConfigDict(extra="ignore")
 
 
@@ -181,7 +161,6 @@ class Google(BaseModel):
 class Config(BaseModel):
     app: App = App()
     llm: LLM = LLM()
-    tokens: Tokens = Tokens()
     notifications: Notifications = Notifications()
     pending_actions: PendingActions = PendingActions()
     backup: Backup = Backup()
@@ -228,7 +207,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
     data = config.model_dump(mode="python")
     lines: list[str] = []
     for section_name in (
-        "app", "llm", "tokens", "notifications", "pending_actions", "backup",
+        "app", "llm", "notifications", "pending_actions", "backup",
         "search", "research", "google",
     ):
         section = data[section_name]

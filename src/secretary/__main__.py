@@ -148,8 +148,10 @@ def main(argv: list[str] | None = None) -> int:
 
         # Search provider + cache + breaker.
         provider = DDGSSearchProvider()
-        breaker = CircuitBreaker(failures=3, open_minutes=10)
-        search_service = SearchService(conn, provider, breaker)
+        breaker = CircuitBreaker(
+            failures=cfg.search.breaker_failures, open_minutes=cfg.search.breaker_open_minutes
+        )
+        search_service = SearchService(conn, provider, breaker, cfg.search.cache_hours)
         conn.search_provider = search_service
 
         # Notifier + tray for reminders.

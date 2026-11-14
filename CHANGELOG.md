@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Config keys now take effect: `search.*` (breaker, cache TTL), `research.max_sources/max_llm_calls`, `notifications.toast/popup_card`, `pending_actions.*` TTLs, `google.window_*_days`, `backup.keep`, `llm.temperature_tools`.
 - Calendar write-back: events created in chat are pushed to Google Calendar (migration 007, `sync_state`, idempotent retries); see ADR-003.
 - `llm.max_output_tokens` config (default 2048); the agent loop honours `llm.max_steps` and `llm.turn_timeout_seconds`.
 - Startup reminder catch-up and a due-backup check.
@@ -12,6 +13,10 @@
 - UI (Phase 5): Settings theme toggle (system/light/dark following Windows color scheme), Settings autostart Run-key toggle, Settings diagnostics button, empty states for all list views, screenshots for all views in light and dark.
 - Store: migration 005 (email_messages), migration 006 (triage_results).
 - Tests: 193 passed; import-linter 7 kept, 0 broken; FakeLLM eval 100%.
+
+### Removed
+- Unused config keys `tokens.*`, `app.language`, `app.quiet_hours_*` (old config files still load).
+- Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
 - Cancelled reminders still fired (and were counted by catch-up) because the due query ignored `deleted_at`.

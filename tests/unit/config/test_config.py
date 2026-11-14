@@ -13,7 +13,6 @@ def test_load_config_returns_defaults(tmp_path, monkeypatch):
     assert cfg.llm.history_messages == 8
     assert cfg.llm.providers["groq"].base_url == "https://api.groq.com/openai/v1"
     assert cfg.llm.limits["groq_primary"].rpm == 0
-    assert cfg.tokens.tool_schema_margin == 800
     assert cfg.notifications.toast is True
     assert cfg.google.enabled is False
 
@@ -21,12 +20,12 @@ def test_load_config_returns_defaults(tmp_path, monkeypatch):
 def test_load_config_merges_user_toml(tmp_path, monkeypatch):
     monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
     (tmp_path / "config.toml").write_text(
-        '[app]\ntheme = "dark"\nquiet_hours_enabled = true\n[llm]\nactive = "gemini"\n',
+        '[app]\ntheme = "dark"\nstart_minimized = false\n[llm]\nactive = "gemini"\n',
         encoding="utf-8",
     )
     cfg = c.load_config()
     assert cfg.app.theme == "dark"
-    assert cfg.app.quiet_hours_enabled is True
+    assert cfg.app.start_minimized is False
     assert cfg.llm.active == "gemini"
     # Unmentioned keys keep defaults.
     assert cfg.app.timezone == "Asia/Kolkata"

@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal
 
+from secretary.config import load_config
 from secretary.notify.popup import PopupCard
 
 logger = logging.getLogger("secretary")
@@ -83,13 +84,15 @@ class Notifier(QObject):
         whole app for up to a minute when a reminder fired. It is therefore
         pumped onto a background thread; the inbox row remains the fallback.
         """
-        if priority or self._desktop_sync is None:
+        settings = load_config().notifications
+        if (priority or self._desktop_sync is None) and settings.popup_card:
             if inbox_id:
                 self._show_popup(title, body, inbox_id)
             else:
                 self._show_popup(title, body)
         if self._desktop_sync is not None:
-            self._send_toast(title, body)
+            if settings.toast:
+                self._send_toast(title, body)
         else:
             self._tray_message(title, body)
         self.notified.emit(title, body)

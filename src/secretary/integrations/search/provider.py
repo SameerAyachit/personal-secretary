@@ -1,5 +1,5 @@
 """Search provider interface and a DuckDuckGo (ddgs) implementation with a circuit
-breaker and a 24-hour SQLite cache (plan §14.1).
+breaker and a configurable-TTL SQLite cache (plan §14.1).
 
 Search results are untrusted (plan §14.1 / §8.6): titles and snippets are treated
 as data, never as instructions.
@@ -10,9 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import ddgs
+
+from secretary.store.repos import search_cache as cache_repo
 
 
 class SearchUnavailable(Exception):
@@ -88,59 +91,43 @@ class CircuitBreaker:
 
 
 class SearchCache:
-    """SQLite-backed cache keyed by a normalised query hash, TTL 24 h.
+    """SQLite-backed cache keyed by a normalised query hash with a TTL.
 
-    Uses :meth:`store.db.Connection.write` (BEGIN IMMEDIATE / COMMIT under the
-    writer lock) instead of bare ``COMMIT`` calls: the store connection runs
-    with ``isolation_level=None`` (autocommit), so there is never an active
-    transaction to commit unless one is explicitly begun (plan §5.4).
+    The ``search_cache`` table comes from migration 003. Writes go through
+    :meth:`store.db.Connection.write` (BEGIN IMMEDIATE / COMMIT under the
+    writer lock); the store connection is autocommit (plan §5.4).
     """
 
-    def __init__(self, con) -> None:
+    def __init__(self, con, ttl_hours: int = 24) -> None:
         self._con = con
-        self._con.write(
-            lambda c: c.execute(
-                "CREATE TABLE IF NOT EXISTS search_cache ("
-                "query_hash TEXT PRIMARY KEY, query TEXT NOT NULL, "
-                "results_json TEXT NOT NULL, fetched_at TEXT NOT NULL)"
-            )
-        )
+        self._ttl = timedelta(hours=ttl_hours)
 
     def _key(self, query: str) -> str:
         return hashlib.sha256(query.strip().lower().encode("utf-8")).hexdigest()
 
     def get(self, query: str) -> list[SearchResult] | None:
-        row = self._con.execute(
-            "SELECT results_json FROM search_cache WHERE query_hash=? AND "
-            "fetched_at > datetime('now', '-1 day')",
-            (self._key(query),),
-        ).fetchone()
-        if not row:
+        cutoff = (datetime.now(UTC) - self._ttl).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw = self._con.read(lambda c: cache_repo.get(c, self._key(query), cutoff))
+        if raw is None:
             return None
-
-        return [SearchResult(**r) for r in json.loads(row[0])]
+        return [SearchResult(**r) for r in json.loads(raw)]
 
     def set(self, query: str, results: list[SearchResult]) -> None:
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self._con.write(
-            lambda c: c.execute(
-                "INSERT INTO search_cache(query_hash, query, results_json, fetched_at) "
-                "VALUES(?,?,?,?) "
-                "ON CONFLICT(query_hash) DO UPDATE SET query=excluded.query, "
-                "results_json=excluded.results_json, fetched_at=excluded.fetched_at",
-                (self._key(query), query, json.dumps([r.to_dict() for r in results]), now),
-            )
-        )
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        payload = json.dumps([r.to_dict() for r in results])
+        self._con.write(lambda c: cache_repo.put(c, self._key(query), query, payload, now))
 
 
 class SearchService:
     """Search with circuit breaker + cache."""
 
-    def __init__(self, con, provider: SearchProvider, breaker: CircuitBreaker) -> None:
+    def __init__(
+        self, con, provider: SearchProvider, breaker: CircuitBreaker, cache_hours: int = 24
+    ) -> None:
         self._con = con
         self._provider = provider
         self._breaker = breaker
-        self._cache = SearchCache(con)
+        self._cache = SearchCache(con, cache_hours)
 
     def search(self, query: str, n: int = 5) -> list[SearchResult]:
         cached = self._cache.get(query)
