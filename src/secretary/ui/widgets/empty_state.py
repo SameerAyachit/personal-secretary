@@ -35,6 +35,3 @@ class EmptyState(QWidget):
             self._action.setObjectName("Accent")
             self._action.clicked.connect(action)
             layout.addWidget(self._action, alignment=Qt.AlignCenter)
-
-    def set_title(self, title: str) -> None:
-        self._title.setText(title)

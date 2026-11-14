@@ -58,15 +58,6 @@ def list_all(
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
-def list_due(con: sqlite3.Connection, *, now_iso: str, limit: int = 200) -> list[dict]:
-    cur = con.execute(
-        "SELECT * FROM reminders WHERE deleted_at IS NULL AND status='scheduled' "
-        "AND next_fire_at IS NOT NULL AND next_fire_at <= ? ORDER BY next_fire_at LIMIT ?",
-        (now_iso, limit),
-    )
-    return [row_to_dict(cur, r) for r in cur.fetchall()]
-
-
 def update(
     con: sqlite3.Connection,
     reminder_id: int,

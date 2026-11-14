@@ -57,9 +57,6 @@ from secretary.tools.research import research_brief_tool
 
 logger = logging.getLogger(__name__)
 
-MAX_INBOX_PREVIEW = 5
-
-
 def get_active_llm_key() -> str | None:
     """Return the API key for the configured LLM provider from Credential Manager.
 
@@ -651,12 +648,6 @@ class Controller(QObject):
             {"date_text": date_iso, "tz": tz, "min_duration_minutes": min_duration_minutes},
         )
 
-    @Slot(str)
-    def undo(self, token: str) -> None:
-        """Undo a previous action (action_log id)."""
-        self.tasks_changed.emit()
-        self.turn_status.emit("Undo not yet wired for this item.")
-
     @Slot(int)
     def ack_inbox(self, inbox_id: int) -> None:
         inbox_repo.update(self.conn, inbox_id, status="acknowledged")
@@ -901,16 +892,3 @@ class Controller(QObject):
             dst = backups_dir() / f"secretary-export-{stamp}.json"
             dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return {"name": dst.name, "path": str(dst), "format": fmt}
-
-    def list_memory_facts(self) -> list[dict]:
-        """Return remembered facts (key/value) for the Settings Memory page."""
-        return facts_repo.list_all(self.conn)
-
-    def remember_fact(self, key: str, value: str) -> dict:
-        """Remember a fact (Settings Memory page)."""
-        facts_repo.upsert(self.conn, key, value)
-        return {"key": key, "value": value}
-
-    def forget_fact(self, key: str) -> bool:
-        """Forget a fact (Settings Memory page)."""
-        return facts_repo.delete(self.conn, key)

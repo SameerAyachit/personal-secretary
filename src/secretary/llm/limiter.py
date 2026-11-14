@@ -121,7 +121,3 @@ class Limiter:
                 remaining = None
             if remaining is not None:
                 self.tok_tokens = min(self.tpm_cap, remaining * 0.9)
-
-    def priority_waiting(self) -> int:
-        """Number of interactive calls currently waiting for tokens."""
-        return self._waiting_interactive

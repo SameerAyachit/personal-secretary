@@ -11,11 +11,3 @@ class RequestTooLarge(LLMError):
 
 class ProviderUnavailable(LLMError):
     """The provider is unavailable or returned an error status."""
-
-
-class NormalizeError(LLMError):
-    """The response could not be normalised into tool calls / text."""
-
-
-class RetriableError(LLMError):
-    """A transient provider error (429, 5xx) that may warrant a retry/fallback."""

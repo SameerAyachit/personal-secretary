@@ -16,7 +16,6 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages"
 GMAIL_MESSAGE_API = (
     "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages/{message_id}"
 )
-READ_ONLY_SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
 
 
 class GmailError(Exception):

@@ -456,10 +456,6 @@ class SettingsView(QWidget):
 
     # ------------------------------------------------------------------ shared
 
-    def refresh_memory(self) -> None:
-        """Kept for API compatibility; memory facts live in Diagnostics now."""
-        return
-
     def _on_theme_changed(self, text: str) -> None:
         mapping = {"System": "system", "Light": "light", "Dark": "dark"}
         theme = mapping[text]
