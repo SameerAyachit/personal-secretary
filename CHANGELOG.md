@@ -19,6 +19,9 @@
 - `research.tokens_per_source` truncates each page and `research.token_budget` caps total page text fed to the model.
 - `pending_actions.expired_retention_days`: the scheduler sweeper deletes expired actions older than that.
 
+### Changed
+- `Controller` split into mixins (`controller/data.py`, `controller/google.py`, `controller/llm_settings.py`); the public API is unchanged. `get_active_llm_key` still imports from `secretary.controller`.
+
 ### Removed
 - `google.enabled` config key (never read; whether Google is connected is decided by the stored token).
 - Unused config keys `tokens.*`, `app.language`, `app.quiet_hours_*` (old config files still load).

@@ -1,8 +1,7 @@
 """Controller Google connect/reconnect (oauth flow + Credential Manager)."""
 from __future__ import annotations
 
-import secretary.controller as cm
-import secretary.controller as controller_module
+import secretary.controller.google as cm
 from secretary.controller import Controller
 from secretary.integrations.google.oauth import (
     CLIENT_ID_KEY,
@@ -145,7 +144,7 @@ def test_get_google_sync_status_failed(tmp_path):
 def test_rebuild_google_client_reaches_running_scheduler(monkeypatch):
     """G2: connecting Google mid-session must hand clients to the scheduler."""
     sentinel = (object(), object())
-    monkeypatch.setattr(controller_module, "build_clients", lambda path: sentinel)
+    monkeypatch.setattr(cm, "build_clients", lambda path: sentinel)
 
     class _Sched:
         got = None
@@ -153,7 +152,7 @@ def test_rebuild_google_client_reaches_running_scheduler(monkeypatch):
         def set_google_clients(self, gmail, calendar):
             self.got = (gmail, calendar)
 
-    controller = controller_module.Controller(conn=None)
+    controller = Controller(conn=None)
     sched = _Sched()
     controller.set_scheduler(sched)
     controller.rebuild_google_client()

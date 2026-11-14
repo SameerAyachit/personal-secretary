@@ -9,48 +9,29 @@ Controller, which is allowed to import ``store`` per the layering contract.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-import shutil
-import threading
-import time
 import uuid
 from datetime import UTC, datetime
 from functools import partial
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QApplication
 
 from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
 from secretary.autostart import set_enabled as _autostart_set_enabled
 from secretary.config import default_timezone, load_config, save_config
-from secretary.integrations.google.clients import build_clients
-from secretary.integrations.google.oauth import (
-    GoogleOAuthError,
-    GoogleOAuthFlow,
-    connected,
-    disconnect,
-    is_invalid_grant,
-)
-from secretary.llm.factory import build_llm
-from secretary.llm.openai_compat import OpenAICompatClient
-from secretary.llm.probe import _probe_once
-from secretary.paths import backups_dir, credentials_path, db_path, logs_dir
-from secretary.secrets import delete_secret, get_secret, set_secret
-from secretary.store.backup import backup, list_backups, prune_backups, restore
+from secretary.controller.data import DataMixin
+from secretary.controller.google import GoogleMixin
+from secretary.controller.llm_settings import LLMSettingsMixin, get_active_llm_key
 from secretary.store.db import Connection
 from secretary.store.repos import chat as chat_repo
 from secretary.store.repos import events as events_repo
-from secretary.store.repos import facts as facts_repo
 from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
-from secretary.store.repos import settings as settings_repo
 from secretary.store.repos import tasks as tasks_repo
 from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.planning import plan_day
@@ -58,24 +39,8 @@ from secretary.tools.research import research_brief_tool
 
 logger = logging.getLogger(__name__)
 
-def get_active_llm_key() -> str | None:
-    """Return the API key for the configured LLM provider from Credential Manager.
 
-    Uses the same service and key name that ``diagnose`` checks: service
-    ``Secretary``, key ``llm_api_key:{provider}`` where ``provider`` is the
-    active provider from config.
-    """
-    cfg = load_config()
-    provider = cfg.llm.active
-    return get_secret(_llm_key_name(provider))
-
-
-def _llm_key_name(provider: str) -> str:
-    """Credential key name for a provider: ``llm_api_key:{provider}``."""
-    return f"llm_api_key:{provider}"
-
-
-class Controller(QObject):
+class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     """Signals out (to the UI) and slots in (from the UI)."""
 
     # Signals out.
@@ -205,33 +170,7 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ LLM provider
 
-    def set_llm_provider(
-        self, provider: str, key: str, base_url: str, model: str
-    ) -> None:
-        """Save an LLM API key to Credential Manager and persist provider config.
 
-        Never overwrites a stored key with a blank field: if ``key`` is empty,
-        the previously saved key is left in place so the user can't accidentally
-        erase it by leaving the field blank.
-        """
-        cfg = load_config()
-        cfg.llm.active = provider
-        cfg.llm.providers[provider].base_url = base_url
-        cfg.llm.providers[provider].primary_model = model
-        cfg.llm.providers[provider].key_name = _llm_key_name(provider)
-        save_config(cfg)
-        if key and key.strip():
-            set_secret(_llm_key_name(provider), key.strip())
-        self.rebuild_llm()
-
-    def rebuild_llm(self) -> None:
-        """Rebuild the LLM client and limiter from the current config.
-
-        Called when the provider, key, or model changes so the active turn
-        loop uses the new settings without a restart (plan A5). Limiter values
-        come from config, not code constants.
-        """
-        self.llm, self.limiter = build_llm(load_config(), get_active_llm_key())
 
     def get_config(self) -> dict:
         """Return current config values for the wizard to pre-fill."""
@@ -242,105 +181,9 @@ class Controller(QObject):
             "theme": cfg.app.theme,
         }
 
-    def get_llm_config(self) -> dict:
-        """Return LLM provider config for the AI settings tab (no secrets)."""
-        cfg = load_config()
-        providers: dict[str, dict] = {}
-        for name, prov in cfg.llm.providers.items():
-            providers[name] = {
-                "base_url": prov.base_url,
-                "model": prov.primary_model,
-                "key_name": prov.key_name,
-            }
-        return {"active": cfg.llm.active, "providers": providers}
 
-    def get_llm_key_status(self, provider: str | None = None) -> dict:
-        """Return LLM key status for the AI settings tab (never the value).
 
-        Status: "missing" (no key in Credential Manager), "placeholder"
-        (key shorter than 20 chars or starts with fake/test), or "saved".
-        """
-        cfg = load_config()
-        provider = provider or cfg.llm.active
-        key_name = f"llm_api_key:{provider}"
-        key = get_secret(key_name)
-        if not key:
-            return {"status": "missing", "provider": provider, "key_name": key_name}
-        if len(key) < 20 or key.lower().startswith(("fake", "test")):
-            return {"status": "placeholder", "provider": provider, "key_name": key_name}
-        return {"status": "saved", "provider": provider, "key_name": key_name}
 
-    @Slot(str)
-    def get_available_models(self, provider: str | None = None) -> None:
-        """List the provider's models on the worker loop; emit models_loaded.
-
-        Never blocks the Qt thread. Returns immediately; results arrive via
-        the models_loaded signal (provider, list[str]). Falls back to the
-        configured primary_model on failure.
-        """
-        cfg = load_config()
-        provider = provider or cfg.llm.active
-        prov = cfg.llm.providers.get(provider)
-        if prov is None:
-            self.models_loaded.emit(provider, [])
-            return
-        key = get_secret(_llm_key_name(provider))
-        if not key:
-            self.models_loaded.emit(provider, [])
-            return
-        client = OpenAICompatClient(base_url=prov.base_url, api_key=key, model=prov.primary_model or "x")
-
-        async def _list_and_close() -> list[str]:
-            try:
-                return await client.list_models()
-            finally:
-                await client.aclose()
-
-        if self._submit_coro is None:
-            self.models_loaded.emit(provider, [])
-            return
-        future = self._submit_coro(_list_and_close())
-        future.add_done_callback(
-            lambda f: self.models_loaded.emit(
-                provider,
-                f.result() if not f.exception() else [],
-            )
-        )
-
-    @Slot(str, str, str)
-    def test_llm_connection(self, base_url: str, api_key: str, model: str) -> None:
-        """Send a tiny probe request on the worker loop; emit connection_tested.
-
-        Uses the stored key when the field is blank, and the provider's
-        base_url (not a hardcoded Groq URL) so it works for Gemini too.
-        """
-        cfg = load_config()
-        provider = cfg.llm.active
-        key = api_key.strip() if api_key and api_key.strip() else get_active_llm_key()
-        if not key:
-            self.connection_tested.emit(
-                provider,
-                {"error": "No LLM key configured. Save one in Settings > AI first."},
-            )
-            return
-
-        async def _probe() -> dict:
-            try:
-                return await _probe_once(key, model, base_url=base_url)
-            except Exception as exc:  # surface exact error, never secrets
-                return {"error": str(exc)}
-
-        if self._submit_coro is None:
-            self.connection_tested.emit(
-                provider, {"error": "Worker loop not available"}
-            )
-            return
-        future = self._submit_coro(_probe())
-        future.add_done_callback(
-            lambda f: self.connection_tested.emit(
-                provider, f.result() if not f.exception() else {"error": str(f.exception())}
-            )
-        )
 
     def set_theme(self, theme: str) -> None:
         """Persist the UI theme (system|light|dark)."""
@@ -365,84 +208,11 @@ class Controller(QObject):
         """Add or remove the Run-key autostart value (plan Appendix E)."""
         _autostart_set_enabled(enabled)
 
-    def get_google_connected(self) -> bool:
-        """True if a Google refresh token is stored in Credential Manager."""
-        try:
-            return connected()
-        except Exception:
-            return False
 
-    def get_google_sync_status(self) -> dict:
-        """Return the last Google Calendar sync status for the UI chip."""
-        try:
-            failed = settings_repo.get(self.conn, "google_sync_failed") == "1"
-            error = settings_repo.get(self.conn, "google_sync_error") or ""
-            return {"failed": bool(failed), "error": str(error)}
-        except Exception:
-            return {"failed": False, "error": ""}
 
-    @Slot()
-    def connect_google(self) -> None:
-        """Run the OAuth consent flow (credentials.json) on a background thread
-        so the UI is not blocked while the user authenticates in the browser.
-        """
-        threading.Thread(target=self._connect_google_background, daemon=True).start()
 
-    def _connect_google_background(self) -> None:
-        """Run the OAuth consent flow on a background thread.
 
-        Every step is logged (without secrets) and any failure is surfaced
-        through the ``error`` signal so the Settings view can show a clear
-        message instead of silently leaving Google "not connected".
-        """
-        logger.info("google connect flow started")
-        try:
-            creds_path = credentials_path()
-            logger.info("google credentials file: %s", creds_path)
-            flow = GoogleOAuthFlow.from_credentials_file(creds_path)
-            logger.info("google consent flow starting (browser + loopback)")
-            flow.run()
-            self.rebuild_google_client()
-            logger.info("google refresh token stored in Credential Manager")
-        except FileNotFoundError:
-            msg = (
-                "credentials.json not found in the data root. "
-                "Download it from the Google Cloud console and place it next to config.toml."
-            )
-            logger.warning("google connect: %s", msg)
-            self.error.emit("google_connect", msg)
-            return
-        except GoogleOAuthError as exc:
-            if is_invalid_grant(exc):
-                disconnect()
-            msg = str(exc)
-            logger.warning("google connect failed: %s", msg)
-            self.error.emit("google_connect", msg)
-            return
-        except Exception as exc:  # unexpected failure: never swallow in the daemon thread
-            msg = f"google connect failed: {exc}"
-            logger.exception("google connect failed unexpectedly")
-            self.error.emit("google_connect", msg)
-            return
-        self.google_connected.emit()
-        logger.info("google connect flow completed")
 
-    @Slot()
-    def disconnect_google(self) -> None:
-        """Remove the Google refresh token (Reconnect Google path)."""
-        with contextlib.suppress(Exception):
-            disconnect()
-        self.google_connected.emit()
-
-    def rebuild_google_client(self) -> None:
-        """Rebuild Gmail + Calendar clients when Google connects (no restart).
-
-        Hands the new clients to the running scheduler so sync and event
-        write-back start immediately (plan D16).
-        """
-        gmail, calendar = build_clients(credentials_path())
-        if self._scheduler is not None:
-            self._scheduler.set_google_clients(gmail, calendar)
 
     def list_events(self, start_iso: str | None = None, end_iso: str | None = None) -> list[dict]:
         """Return calendar events in [start_iso, end_iso)."""
@@ -751,111 +521,8 @@ class Controller(QObject):
 
     # ---- Data: backups, restore, delete-all, export (plan §5.5, §941-942) ----
 
-    def list_backups(self) -> list[dict]:
-        """Return available backups, newest first (Settings Data page)."""
-        out: list[dict] = []
-        for p in list_backups(backups_dir()):
-            st = p.stat()
-            out.append({"name": p.name, "path": str(p), "size": st.st_size, "mtime": st.st_mtime})
-        return out
 
-    def backup_now(self) -> dict | None:
-        """Force a backup now (Settings Data 'Backup now')."""
-        backups_dir().mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        dst = backups_dir() / f"secretary-{stamp}.db"
-        backup(self.conn, dst)
-        prune_backups(backups_dir(), load_config().backup.keep)
-        return {"name": dst.name, "path": str(dst)}
 
-    def restore_backup(self, backup_name: str) -> dict:
-        """Restore a backup: stop background threads, safety-copy the current DB,
-        replace it, then quit so the app restarts into the restored data
-        (Settings Data 'Restore')."""
-        self._stop_background()
-        src = backups_dir() / backup_name
-        if not src.exists():
-            return {"error": "backup not found"}
-        # Do not replace a database that is open.
-        if self.conn is not None and self.conn._con is not None:
-            with contextlib.suppress(Exception):
-                self.conn.close()
-        safety = restore(src, db_path())
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
-        return {"safety": str(safety), "restored": backup_name}
 
-    def delete_all_data(self) -> dict:
-        """Wipe the DB, backups, logs and Credential Manager entries, then quit
-        (Settings Data 'Delete all data', plan §941)."""
-        self._stop_background()
-        self.conn.close()
-        db = db_path()
-        with contextlib.suppress(FileNotFoundError):
-            db.unlink()
-        for suffix in ("-wal", "-shm"):
-            with contextlib.suppress(FileNotFoundError):
-                Path(str(db) + suffix).unlink()
-        bd = backups_dir()
-        if bd.exists():
-            shutil.rmtree(bd)
-        ld = logs_dir()
-        if ld.exists():
-            # Close logging handlers before deleting the logs folder.
-            for handler in logging.root.handlers[:]:
-                handler.close()
-                logging.root.removeHandler(handler)
-            for name in logging.Logger.manager.loggerDict:
-                logger_obj = logging.Logger.manager.loggerDict[name]
-                if isinstance(logger_obj, logging.Logger):
-                    for handler in logger_obj.handlers[:]:
-                        handler.close()
-                        logger_obj.removeHandler(handler)
-            shutil.rmtree(ld)
-        # Remove LLM keys as well as Google ones.
-        delete_secret("google_token")
-        delete_secret("google_client_id")
-        cfg = load_config()
-        for provider in list(cfg.llm.providers.keys()):
-            delete_secret(_llm_key_name(provider))
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
-        return {"deleted": True}
 
-    def _stop_background(self) -> None:
-        """Stop scheduler and worker before destructive data operations."""
-        if self._scheduler is not None:
-            with contextlib.suppress(Exception):
-                self._scheduler.stop()
-        if self._worker is not None:
-            with contextlib.suppress(Exception):
-                self._worker.stop()
 
-    def export_data(self, fmt: str = "json") -> dict:
-        """Export tasks, reminders, events and facts as JSON or Markdown
-        (Settings Data 'Export', plan §942)."""
-        payload = {
-            "tasks": tasks_repo.list_open(self.conn),
-            "reminders": reminders_repo.list_all(self.conn),
-            "events": events_repo.list_window(self.conn, start_at="", end_at=""),
-            "facts": facts_repo.list_all(self.conn),
-            "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        backups_dir().mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        if fmt == "markdown":
-            lines = ["# Secretary export", f"Generated: {payload['exported_at']}", ""]
-            for section in ("tasks", "reminders", "events", "facts"):
-                lines.append(f"## {section.title()}")
-                for row in payload[section]:
-                    lines.append("- " + " | ".join(f"{k}={v}" for k, v in row.items() if v is not None))
-                lines.append("")
-            text = "\n".join(lines)
-            dst = backups_dir() / f"secretary-export-{stamp}.md"
-            dst.write_text(text, encoding="utf-8")
-        else:
-            dst = backups_dir() / f"secretary-export-{stamp}.json"
-            dst.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        return {"name": dst.name, "path": str(dst), "format": fmt}

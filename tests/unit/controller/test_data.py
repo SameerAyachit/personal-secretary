@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-import secretary.controller as cm
+import secretary.controller.data as cm
 from secretary.controller import Controller
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
