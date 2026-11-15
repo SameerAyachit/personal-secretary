@@ -24,7 +24,7 @@ _DEFAULTS: dict[str, Any] = {
     "llm": {
         "active": "nvidia",
         "history_messages": 8,
-        "max_steps": 5,
+        "max_steps": 8,
         "max_output_tokens": 2048,
         "turn_timeout_seconds": 90,
         "temperature_tools": 0.1,
@@ -96,7 +96,7 @@ class _Provider(BaseModel):
 class LLM(BaseModel):
     active: str = "nvidia"
     history_messages: int = 8
-    max_steps: int = 5
+    max_steps: int = 8
     max_output_tokens: int = 2048
     turn_timeout_seconds: int = 90
     temperature_tools: float = 0.1

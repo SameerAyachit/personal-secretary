@@ -20,8 +20,9 @@ from secretary.integrations.google.oauth import connected as google_connected
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import undo as undo_repo
-from secretary.timeparse.when import resolve_date, resolve_when
+from secretary.timeparse.when import AmbiguousTime, PastTime, resolve_date, resolve_when
 from secretary.tools.registry import SafetyClass, ToolSpec
+from secretary.tools.timeerrors import time_error
 
 
 def _utc_now() -> datetime:
@@ -63,13 +64,16 @@ def _day_bounds(day_text: str, now: datetime, tz: str) -> tuple[datetime, dateti
 def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
     parsed = EventCreateArgs(**args)
     now = _utc_now()
-    if parsed.all_day:
-        start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
-        all_day = 1
-    else:
-        start_local = resolve_when(parsed.when_text, now, parsed.tz)
-        end_local = start_local + timedelta(minutes=_duration_minutes(parsed.duration_text))
-        all_day = 0
+    try:
+        if parsed.all_day:
+            start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
+            all_day = 1
+        else:
+            start_local = resolve_when(parsed.when_text, now, parsed.tz)
+            end_local = start_local + timedelta(minutes=_duration_minutes(parsed.duration_text))
+            all_day = 0
+    except (PastTime, AmbiguousTime) as exc:
+        return time_error(exc, parsed.when_text)
     start_utc = start_local.astimezone(UTC)
     end_utc = end_local.astimezone(UTC)
     # Class B conflict warning: warn about overlapping EXISTING events before
@@ -211,8 +215,8 @@ def event_update(conn: Connection, turn_id: str, args: dict) -> dict:
                     if parsed.duration_text else old_end - old_start
                 )
                 end_local = start_local + length
-        except Exception as exc:
-            return {"error": f"could not resolve time '{parsed.when_text}': {exc}. Ask the user for a clearer time."}
+        except (PastTime, AmbiguousTime) as exc:
+            return time_error(exc, parsed.when_text or "")
         fields["start_at"] = start_local.astimezone(UTC).isoformat()
         fields["end_at"] = end_local.astimezone(UTC).isoformat()
         fields["tz"] = parsed.tz

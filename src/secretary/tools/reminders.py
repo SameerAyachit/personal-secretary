@@ -24,9 +24,10 @@ from secretary.timeparse.recurrence import (
     UnparseableRecurrence,
     parse_recurrence,
 )
-from secretary.timeparse.when import resolve_when
+from secretary.timeparse.when import AmbiguousTime, PastTime, resolve_when
 from secretary.tools.idempotency import idempotency_key
 from secretary.tools.registry import SafetyClass, ToolSpec
+from secretary.tools.timeerrors import time_error
 
 _DEDUPE_WINDOW_SECONDS = 60
 
@@ -96,8 +97,8 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
     tz = parsed.tz
     try:
         fire_local = resolve_when(parsed.when_text, now, tz)
-    except Exception as exc:
-        return {"error": f"could not resolve time '{parsed.when_text}': {exc}"}
+    except (PastTime, AmbiguousTime) as exc:
+        return time_error(exc, parsed.when_text)
     fire_utc = fire_local.astimezone(UTC)
 
     existing = _dedupe_existing(conn, parsed.title, fire_utc)
@@ -120,7 +121,7 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
             rule_json = rule.to_json()
             kind = "recurring"
         except UnparseableRecurrence as exc:
-            return {"error": f"could not parse recurrence '{parsed.recurrence_text}': {exc}"}
+            return time_error(exc, parsed.recurrence_text)
 
     key = idempotency_key(turn_id, "reminder_create", parsed.model_dump())
     # If a reminder with this idempotency key already exists (any status),

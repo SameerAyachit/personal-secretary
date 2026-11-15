@@ -1,7 +1,7 @@
 """Agent turn loop (plan §8.1).
 
 ``run_turn`` drives a tool-calling loop with guards:
-  * max ``MAX_STEPS`` (5) per turn
+  * max ``MAX_STEPS`` (8) per turn
   * per-turn token budget via the :class:`~secretary.llm.limiter.Limiter`
   * identical-call deduplication within a turn
   * loop detection (same call repeated across steps)
@@ -29,7 +29,9 @@ from secretary.tools.registry import Registry, SafetyClass
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 5
+MAX_STEPS = 8
+# The same tool failing this many times in a row ends the turn with the real reason.
+_MAX_FAIL_STREAK = 2
 TURN_TIMEOUT_SECONDS = 90
 TOOL_RESULT_BUDGET = 800
 
@@ -86,6 +88,12 @@ def _claims_action(text: str) -> bool:
     if _ACTION_NOUNS.search(text) and _ACTION_DONE.search(text):
         return True
     return bool(_ACTION_ON_PRONOUN.search(text))
+
+
+def _failure_text(result: dict) -> str:
+    """The plain-language reason a tool call failed, for the user."""
+    message = result.get("user_message") or str(result.get("error") or "").strip()
+    return message or "Something went wrong."
 
 
 def _estimate_tokens(messages: list[dict], tools: list[dict]) -> int:
@@ -167,7 +175,10 @@ async def _execute_call(
         # A failing tool must come back to the LLM as an error result, never
         # abort the whole turn (concern C-19).
         logger.exception("tool %s raised during turn %s", call.name, turn_id)
-        return {"error": f"tool {call.name} failed: {exc}"}
+        return {
+            "error": f"tool {call.name} failed: {exc}",
+            "user_message": f"Something went wrong while running {call.name}: {exc}",
+        }
 
 
 async def run_turn(
@@ -187,6 +198,9 @@ async def run_turn(
     recent_sigs: list[str] = []
     tool_ran = False
     nudged = False
+    last_failure: str | None = None
+    fail_tool: str | None = None
+    fail_streak = 0
     cfg = load_config()
     max_steps = cfg.llm.max_steps or MAX_STEPS
     timeout_s = cfg.llm.turn_timeout_seconds or TURN_TIMEOUT_SECONDS
@@ -207,6 +221,8 @@ async def run_turn(
     while True:
         guard_steps += 1
         if guard_steps > max_steps:
+            if last_failure:
+                return last_failure
             return "I've reached the step limit for this turn. How would you like to proceed?"
         if time.monotonic() - start > timeout_s:
             return "The turn timed out. Please try again."
@@ -260,11 +276,13 @@ async def run_turn(
             seen_call_keys.append(dedupe_key)
             calls.append(tc)
         if not calls:
-            return resp.text or "I'm not sure how to help with that."
+            return last_failure or resp.text or "I'm not sure how to help with that."
 
         # Loop detection: same call repeated across steps.
         sig = json.dumps([(c.name, c.args) for c in calls], sort_keys=True)
         if sig in recent_sigs:
+            if last_failure:
+                return last_failure
             return "I appear to be repeating myself. What would you like me to do instead?"
         recent_sigs.append(sig)
         if len(recent_sigs) > 3:
@@ -274,6 +292,16 @@ async def run_turn(
             logger.info("chat turn %s: tool call %s", turn_id, call.name)
             result = await _execute_call(call, registry, conn, turn_id, tz=ctx.get("tz"))
             tool_ran = True
+            if isinstance(result, dict) and result.get("error"):
+                last_failure = _failure_text(result)
+                fail_streak = fail_streak + 1 if fail_tool == call.name else 1
+                fail_tool = call.name
+                if fail_streak >= _MAX_FAIL_STREAK:
+                    logger.info("chat turn %s: %s failed %d times, stopping",
+                                turn_id, call.name, fail_streak)
+                    return last_failure
+            else:
+                last_failure, fail_tool, fail_streak = None, None, 0
             messages.append(
                 {
                     "role": "assistant",

@@ -1,9 +1,9 @@
 # Secretary eval report — fake
-Generated: 2026-11-15T20:39:27
+Generated: 2026-11-15T21:43:01
 
 Total cases: 40  |  Passed: 40  |  Failed: 0
 Pass rate: 100.0%
-Median latency: 0.0 ms  |  Mean latency: 0.0 ms
+Median latency: 15.0 ms  |  Mean latency: 15.0 ms
 
 ## Decision table (plan §7.9)
 | Result | Action |

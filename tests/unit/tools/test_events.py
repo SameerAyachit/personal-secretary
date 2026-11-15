@@ -11,14 +11,12 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
 import time_machine
 
 import secretary.tools.events as events_tools
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import events as events_repo
-from secretary.timeparse.when import PastTime
 from secretary.tools.events import event_create, event_list
 
 
@@ -58,15 +56,15 @@ def test_event_create_persists_in_store():
         conn.close()
 
 
-def test_event_create_past_time_raises():
+def test_event_create_past_time_returns_a_plain_error():
     conn = _conn()
     try:
-        with pytest.raises(PastTime):
-            event_create(
-                conn,
-                "turn-1",
-                {"title": "late meeting", "when_text": "yesterday 09:00", "tz": "Asia/Kolkata"},
-            )
+        out = event_create(
+            conn,
+            "turn-1",
+            {"title": "late meeting", "when_text": "yesterday 09:00", "tz": "Asia/Kolkata"},
+        )
+        assert "already in the past" in out["error"] and "user_message" in out
     finally:
         conn.close()
 

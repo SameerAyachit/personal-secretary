@@ -12,6 +12,7 @@ from secretary.timeparse.when import (
     PastTime,
     extract_when_phrase,
     normalize_text,
+    parse_when,
     resolve_date,
     resolve_when,
     warm_up,
@@ -55,10 +56,38 @@ def test_resolve_when_unparseable_raises():
         resolve_when("the thing", _now(), "Asia/Kolkata")
 
 
-def test_resolve_when_bare_time_is_ambiguous():
-    # A bare time like "9am" with no date/meridiem context does not parse.
-    with pytest.raises(AmbiguousTime):
-        resolve_when("9am", _now(), "Asia/Kolkata")
+@pytest.mark.parametrize("text", ["11am", "at 11am", "11:00", "at 11:30 pm"])
+def test_resolve_when_bare_clock_time_means_today_in_the_target_zone(text):
+    # dateparser returns None for a bare clock time when RELATIVE_BASE is tz-aware and
+    # TIMEZONE is set; the base must be passed as a naive local wall clock.
+    dt = resolve_when(text, _now(), "Asia/Kolkata")
+    assert dt.date() == _now().date()
+    assert dt.tzinfo is not None
+    assert (dt.hour, dt.minute) in {(11, 0), (23, 30), (11, 30)}
+
+
+def test_resolve_when_bare_time_that_passed_means_the_next_occurrence():
+    # Plan 9.2 ("at 9": next occurrence): 9am at 10:00 is tomorrow 9am, never a past time.
+    dt = resolve_when("9am", _now(), "Asia/Kolkata")
+    assert dt.date() == _now().date() + _dt.timedelta(days=1)
+    assert (dt.hour, dt.minute) == (9, 0)
+
+
+def test_resolve_when_bare_time_works_when_now_is_a_utc_instant():
+    now_utc = _dt.datetime(2026, 11, 15, 15, 56, tzinfo=ZoneInfo("UTC"))  # 21:26 IST
+    dt = resolve_when("at 11pm", now_utc, "Asia/Kolkata")
+    assert (dt.day, dt.hour, dt.minute) == (15, 23, 0)
+    dt = resolve_when("4pm", now_utc, "Asia/Kolkata")  # passed today: next occurrence
+    assert (dt.day, dt.hour, dt.minute) == (16, 16, 0)
+    with pytest.raises(PastTime):
+        resolve_when("today 4pm", now_utc, "Asia/Kolkata")
+
+
+def test_parse_when_allows_a_time_that_already_passed_today():
+    now_utc = _dt.datetime(2026, 11, 15, 15, 56, tzinfo=ZoneInfo("UTC"))  # 21:26 IST
+    dt = parse_when("today 4pm", now_utc, "Asia/Kolkata")
+    assert (dt.day, dt.hour, dt.minute) == (15, 16, 0)
+    assert dt.tzinfo is not None
 
 
 def test_resolve_when_returns_tz_aware():

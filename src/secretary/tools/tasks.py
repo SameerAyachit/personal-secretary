@@ -18,9 +18,10 @@ from secretary.store.db import Connection
 from secretary.store.repos import tasks as tasks_repo
 from secretary.store.repos import undo as undo_repo
 from secretary.store.repos._base import now_utc
-from secretary.timeparse.when import resolve_when
+from secretary.timeparse.when import AmbiguousTime, PastTime, resolve_when
 from secretary.tools.idempotency import idempotency_key
 from secretary.tools.registry import SafetyClass, ToolSpec
+from secretary.tools.timeerrors import time_error
 
 _DEDUPE_WINDOW_SECONDS = 60
 
@@ -91,8 +92,8 @@ def task_create(conn: Connection, turn_id: str, args: dict) -> dict:
     if parsed.when_text:
         try:
             due_at = _resolve_due(parsed.when_text, parsed.tz)
-        except Exception as exc:
-            return {"error": f"could not resolve time '{parsed.when_text}': {exc}. Ask the user for a clearer time."}
+        except (PastTime, AmbiguousTime) as exc:
+            return time_error(exc, parsed.when_text)
     existing = _recent_duplicate(conn, parsed.title)
     if existing is not None:
         return {
@@ -223,8 +224,8 @@ def task_update(conn: Connection, turn_id: str, args: dict) -> dict:
     if parsed.when_text:
         try:
             fields["due_at"] = _resolve_due(parsed.when_text, parsed.tz)
-        except Exception as exc:
-            return {"error": f"could not resolve time '{parsed.when_text}': {exc}. Ask the user for a clearer time."}
+        except (PastTime, AmbiguousTime) as exc:
+            return time_error(exc, parsed.when_text)
         fields["due_tz"] = parsed.tz
     if not fields:
         return {"error": "nothing to change: give a new title, notes, time or priority"}

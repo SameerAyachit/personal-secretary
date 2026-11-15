@@ -39,9 +39,12 @@ _DURATION_REPLACEMENTS = [
     ("half hour", "30 minutes"),
 ]
 
+# No TIMEZONE / RETURN_AS_TIMEZONE_AWARE here on purpose: with them dateparser treats a
+# naive RELATIVE_BASE as UTC for clock-only text ("11am" rolled to tomorrow) and returns
+# None for bare clock times when the base is aware. Everything runs on the target zone's
+# naive wall clock instead, and the zone is attached afterwards.
 _SETTINGS = {
     "DATE_ORDER": "DMY",  # plan §9.2: "05/11" → 5 November
-    "RETURN_AS_TIMEZONE_AWARE": True,
     "PREFER_DATES_FROM": "future",
 }
 
@@ -61,13 +64,30 @@ SYNONYMS = _WHOLE_PHRASE_SYNONYMS  # public name (synonym → normalized phrase)
 
 
 def _parse(text: str, now: datetime, tz: str):
-    # dateparser reads clock times ("9am") and day boundaries ("today") in the
-    # zone of RELATIVE_BASE, so the base must be expressed in the target zone
-    # even when the caller holds a UTC instant.
+    # dateparser reads clock times ("9am") and day boundaries ("today") on the wall
+    # clock of RELATIVE_BASE, so the base is the target zone's naive local time even
+    # when the caller holds a UTC instant (see the note on _SETTINGS).
     if now.tzinfo is not None:
-        now = now.astimezone(ZoneInfo(tz))
-    settings = {**_SETTINGS, "TIMEZONE": tz, "RELATIVE_BASE": now}
+        now = now.astimezone(ZoneInfo(tz)).replace(tzinfo=None)
+    settings = {**_SETTINGS, "RELATIVE_BASE": now}
     return dateparser.parse(text, settings=settings)
+
+
+def parse_when(text: str, now: datetime, tz: str) -> datetime:
+    """Resolve ``text`` to a datetime in ``tz`` without requiring it to be in the future.
+
+    Used where only the wall-clock time matters (the time of day of a recurring
+    event). Raises ``AmbiguousTime`` if unparseable.
+    """
+    zone = ZoneInfo(tz)
+    dt = _parse(text, now, tz)
+    if dt is None:
+        dt = _parse(normalize_text(text), now, tz)
+    if dt is None:
+        raise AmbiguousTime(text)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=zone)
+    return dt.astimezone(zone)
 
 
 def resolve_when(text: str, now: datetime, tz: str) -> datetime:
@@ -77,16 +97,7 @@ def resolve_when(text: str, now: datetime, tz: str) -> datetime:
     unparseable, ``PastTime`` if the result is not strictly after ``now``.
     ``RELATIVE_BASE`` is passed explicitly so tests can freeze time.
     """
-    zone = ZoneInfo(tz)
-    dt = _parse(text, now, tz)
-    if dt is None:
-        dt = _parse(normalize_text(text), now, tz)
-    if dt is None:
-        raise AmbiguousTime(text)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=zone)
-    else:
-        dt = dt.astimezone(zone)
+    dt = parse_when(text, now, tz)
     if dt <= now:
         raise PastTime(text, dt)
     return dt

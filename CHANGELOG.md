@@ -40,6 +40,8 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- Chat said "I've reached the step limit" for "set ... every day 4pm to 6pm": a time that had passed today raised an unreadable error inside `event_create`, and the model retried until the limit. Time problems now come back as plain, actionable errors (`tools/timeerrors.py`), the loop stops after the same tool fails twice and tells you the real reason, and `llm.max_steps` defaults to 8.
+- Bare clock times ("4pm", "at 11am", "16:00") never parsed (dateparser returned nothing for them with a time-zone-aware base, or read the base as UTC). They now resolve on the target zone's wall clock; a bare time that already passed means its next occurrence, as plan 9.2 says.
 - Packaged build: the PyInstaller exe failed at start-up ("attempted relative import with no known parent package", missing `desktop_notifier.resources`). The spec now runs a `packaging/entry.py` shim and bundles the notifier's data files; `secretary.exe --diagnose` passes from a fresh build.
 - Settings > Data export always left the events section empty (empty time window); it now exports all events.
 - Absolute times set through chat ("tomorrow at 9am") were read as UTC clock times: `resolve_when` did not convert `now` into the target zone, and the reminder, event and task tools pass a UTC `now`, so such reminders/events landed hours late (5.5 h in IST). Relative times ("in 10 minutes") and the Tasks/Quick-add paths were not affected. `resolve_when`/`resolve_date` now always read the clock in the target zone.
