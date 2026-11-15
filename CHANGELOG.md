@@ -40,6 +40,7 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- Packaged build: the PyInstaller exe failed at start-up ("attempted relative import with no known parent package", missing `desktop_notifier.resources`). The spec now runs a `packaging/entry.py` shim and bundles the notifier's data files; `secretary.exe --diagnose` passes from a fresh build.
 - Settings > Data export always left the events section empty (empty time window); it now exports all events.
 - Absolute times set through chat ("tomorrow at 9am") were read as UTC clock times: `resolve_when` did not convert `now` into the target zone, and the reminder, event and task tools pass a UTC `now`, so such reminders/events landed hours late (5.5 h in IST). Relative times ("in 10 minutes") and the Tasks/Quick-add paths were not affected. `resolve_when`/`resolve_date` now always read the clock in the target zone.
 - `task_create` ignored `when_text` (tasks made in chat never got a due date). It now resolves it in code, asks for a clearer time instead of silently dropping an unparseable one, and de-duplicates the same title within a minute.

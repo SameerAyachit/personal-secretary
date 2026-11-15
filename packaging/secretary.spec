@@ -13,19 +13,24 @@ Built with: pyinstaller packaging/secretary.spec
 
 from __future__ import annotations
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
 # tzdata package data (zoneinfo is required on Windows).
 tzdata_datas = collect_data_files("tzdata")
 
+# desktop-notifier ships resources (icons, backends) that must travel with the exe.
+notifier_datas = collect_data_files("desktop_notifier")
+notifier_modules = collect_submodules("desktop_notifier")
+
 a = Analysis(
-    ["../src/secretary/__main__.py"],
-    pathex=[".."],
+    ["entry.py"],  # shim: __main__.py uses relative imports and cannot be the script
+    pathex=["../src"],
     binaries=[],
     datas=[
         *tzdata_datas,
+        *notifier_datas,
         # Vendored tiktoken encoding (tokens.py sets TIKTOKEN_CACHE_DIR to this folder).
         ("../src/secretary/llm/vendor/cl100k_base.tiktoken", "secretary/llm/vendor"),
         # Schema migrations must ship with the app.
@@ -42,6 +47,7 @@ a = Analysis(
         "tzdata",
         "keyring",
         "desktop_notifier",
+        *notifier_modules,
         "dateparser",
         "httpx",
     ],
