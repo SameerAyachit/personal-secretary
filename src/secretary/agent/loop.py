@@ -49,24 +49,43 @@ SYSTEM_PROMPT = (
 )
 
 
-_EMAIL_WORDS = re.compile(r"\b(e-?mail|mail|draft)\b", re.IGNORECASE)
-_DONE_WORDS = re.compile(r"\b(saved|sent|queued|created|drafted|prepared)\b", re.IGNORECASE)
-_EMAIL_CLAIM_NUDGE = (
-    "You said an email was saved or sent, but you called no tool this turn, so nothing "
-    "was done. Call email_draft now (the subject may be empty), or tell the user plainly "
-    "that you have not done it yet."
+_ACTION_NOUNS = re.compile(
+    r"\b(tasks?|reminders?|events?|meetings?|appointments?|notes?|e-?mails?|mails?|drafts?)\b",
+    re.IGNORECASE,
+)
+_ACTION_DONE = re.compile(
+    r"\b(added|saved|created|set|sent|queued|drafted|prepared|scheduled|rescheduled|updated|"
+    r"completed|deleted|removed|marked|cancelled|canceled|snoozed|moved)\b",
+    re.IGNORECASE,
+)
+_ACTION_ON_PRONOUN = re.compile(
+    r"\b(added|saved|created|sent|scheduled|marked|completed|deleted|removed|cancelled|canceled|"
+    r"snoozed|moved|updated|rescheduled)\s+(it|that|them|this)\b",
+    re.IGNORECASE,
+)
+_EMAIL_WORDS = re.compile(r"\b(e-?mails?|mails?|drafts?)\b", re.IGNORECASE)
+_CLAIM_NUDGE = (
+    "You said something was saved, created, sent or changed, but you called no tool this turn, "
+    "so nothing was done. Call the right tool now, or tell the user plainly that you have not "
+    "done it yet."
 )
 _EMAIL_CLAIM_FALLBACK = (
     "I haven't saved or sent anything yet. Tell me who it is for and what it should say "
     "(a subject is optional) and I'll save it as a draft under Approvals > Drafts."
 )
+_CLAIM_FALLBACK = (
+    "I haven't done that yet: nothing was saved or changed. Tell me again what you want "
+    "and I'll do it."
+)
 
 
-def _claims_email_action(text: str) -> bool:
-    """True when a reply states that an email was saved/sent (a claim, not a question)."""
+def _claims_action(text: str) -> bool:
+    """True when a reply states that something was created/changed/sent (a claim, not a question)."""
     if not text or "?" in text:
         return False
-    return bool(_EMAIL_WORDS.search(text) and _DONE_WORDS.search(text))
+    if _ACTION_NOUNS.search(text) and _ACTION_DONE.search(text):
+        return True
+    return bool(_ACTION_ON_PRONOUN.search(text))
 
 
 def _estimate_tokens(messages: list[dict], tools: list[dict]) -> int:
@@ -221,15 +240,15 @@ async def run_turn(
             if resp.finish_reason == "length":
                 return ("I ran out of output room before finishing my answer. "
                         "Try asking a shorter question, or I can continue in parts.")
-            if not tool_ran and _claims_email_action(resp.text):
-                # The model claimed an email action without doing it. Give it one
+            if not tool_ran and _claims_action(resp.text):
+                # The model claimed an action without doing it. Give it one
                 # chance to really call the tool, then answer honestly.
                 if not nudged:
                     nudged = True
                     messages.append({"role": "assistant", "content": resp.text})
-                    messages.append({"role": "user", "content": _EMAIL_CLAIM_NUDGE})
+                    messages.append({"role": "user", "content": _CLAIM_NUDGE})
                     continue
-                return _EMAIL_CLAIM_FALLBACK
+                return _EMAIL_CLAIM_FALLBACK if _EMAIL_WORDS.search(resp.text) else _CLAIM_FALLBACK
             return resp.text or "I'm not sure how to help with that."
 
         # Dedupe identical calls within this turn.
