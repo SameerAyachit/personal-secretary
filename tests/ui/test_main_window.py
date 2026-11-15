@@ -71,7 +71,7 @@ def test_tasks_quick_add_without_llm(qapp, controller):
     rows = controller.list_tasks()
     assert any("submit the lab report" in r["title"] for r in rows)
     view.refresh()
-    titles = [view._list.item(i).text() for i in range(view._list.count())]
+    titles = view.titles()
     assert "submit the lab report" in titles
 
 

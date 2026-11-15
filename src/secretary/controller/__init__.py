@@ -42,6 +42,7 @@ from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.email import email_send_prepare
 from secretary.tools.planning import plan_day
 from secretary.tools.research import run_research_job
+from secretary.tools.tasks import filter_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +119,38 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
 
     def set_worker(self, worker) -> None:
         self._worker = worker
-    def list_tasks(self) -> list[dict]:
-        """Return open tasks (for the UI to display)."""
+    def list_tasks(self, filter_key: str = "open", query: str = "") -> list[dict]:
+        """Tasks for the UI: ``filter_key`` is open|today|overdue|done, ``query`` searches title and notes."""
         try:
-            return tasks_repo.list_open(self.conn)
+            tz = self.get_config().get("timezone") or "UTC"
+            return filter_tasks(self.conn, filter_key, query or None, tz)
         except Exception:
             return []
+
+    def complete_task(self, task_id: int, done: bool = True) -> None:
+        """Mark a task done (or open it again); no LLM involved."""
+        self._turn_id += 1
+        tasks_repo.update(
+            self.conn, task_id, status="done" if done else "open",
+            completed_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if done else None,
+            turn_id=f"manual-{self._turn_id}",
+        )
+        self.tasks_changed.emit()
+
+    def rename_task(self, task_id: int, title: str) -> bool:
+        """Change a task's title; a blank title is refused."""
+        title = (title or "").strip()
+        if not title:
+            return False
+        self._turn_id += 1
+        ok = tasks_repo.update(self.conn, task_id, title=title, turn_id=f"manual-{self._turn_id}")
+        self.tasks_changed.emit()
+        return ok
+
+    def delete_task(self, task_id: int) -> None:
+        self._turn_id += 1
+        tasks_repo.soft_delete(self.conn, task_id, turn_id=f"manual-{self._turn_id}")
+        self.tasks_changed.emit()
 
     def list_research_briefs(self, limit: int = 20) -> list[dict]:
         """Recent research briefs (running, done, failed), newest first, for the Research tab."""

@@ -142,12 +142,17 @@ def _due_local_date(row: dict, zone: ZoneInfo):
     return when.astimezone(zone).date()
 
 
-def task_list(conn: Connection, turn_id: str, args: dict) -> dict:
-    parsed = TaskListArgs(**args)
-    zone = ZoneInfo(parsed.tz)
-    now = _utc_now()
+def filter_tasks(
+    conn: Connection, wanted: str, query: str | None, tz: str, now: datetime | None = None
+) -> list[dict]:
+    """Tasks for a filter (open|today|tomorrow|week|overdue|done) and an optional search text.
+
+    Shared by the ``task_list`` tool and the Tasks view so both always agree.
+    """
+    zone = ZoneInfo(tz)
+    now = now or _utc_now()
     today = now.astimezone(zone).date()
-    wanted = parsed.filter.lower()
+    wanted = (wanted or "open").lower()
     rows = tasks_repo.list_all(conn, status="done" if wanted == "done" else "open")
 
     def keep(row: dict) -> bool:
@@ -163,9 +168,15 @@ def task_list(conn: Connection, turn_id: str, args: dict) -> dict:
         return True
 
     rows = [r for r in rows if keep(r)]
-    if parsed.query:
-        needle = parsed.query.lower()
+    if query:
+        needle = query.lower()
         rows = [r for r in rows if needle in f"{r['title']} {r.get('notes') or ''}".lower()]
+    return rows
+
+
+def task_list(conn: Connection, turn_id: str, args: dict) -> dict:
+    parsed = TaskListArgs(**args)
+    rows = filter_tasks(conn, parsed.filter, parsed.query, parsed.tz)
     return {"tasks": [_brief(r, parsed.tz) for r in rows]}
 
 

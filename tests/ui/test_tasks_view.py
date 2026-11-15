@@ -57,7 +57,7 @@ def test_tasks_view_shows_created_tasks(qapp):
         assert view._list.isVisible()
         assert view._list.count() == 1
         item = view._list.item(0)
-        assert item.text() == "buy groceries"
+        assert item.data(256 + 1) == "buy groceries"
         # The quick-add input should still be present and focusable.
         assert isinstance(view.findChild(QLineEdit), QLineEdit)
     finally:
