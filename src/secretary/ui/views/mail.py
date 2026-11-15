@@ -2,17 +2,20 @@
 
 The triage job classifies recent unread Gmail messages into a category, an
 urgency and a suggested action (fixed enums, produced by a tool-less LLM call).
-This view lists them so the work is visible. It is read-only: nothing here can
-send or change mail.
+This view lists them so the work is visible. It never changes mail: "Draft reply"
+opens Chat with a prompt (the draft still needs your approval to send) and "Create
+task" adds a follow-up task.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -22,7 +25,8 @@ from secretary.ui.widgets.empty_state import EmptyState
 
 _SUBTITLE = (
     "Recent Gmail messages the assistant has classified: what kind of mail it is, how "
-    "urgent it looks and what you might do with it. Read-only; nothing is sent or changed."
+    "urgent it looks and what you might do with it. Nothing is sent from here: a reply "
+    "becomes a draft you approve."
 )
 _EMPTY = (
     "No classified mail yet. Connect Google in Settings; new unread messages are "
@@ -109,6 +113,19 @@ class MailView(QWidget):
         )
         sender.setObjectName("Caption")
         layout.addWidget(sender)
+
+        mid = row["id"]
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        reply = QPushButton("Draft reply")
+        reply.setAccessibleName(f"Draft a reply to {row.get('subject') or 'this email'}")
+        reply.clicked.connect(lambda checked=False, m=mid: self._controller.request_reply_draft(m))
+        buttons.addWidget(reply)
+        task = QPushButton("Create task")
+        task.setAccessibleName(f"Create a task for {row.get('subject') or 'this email'}")
+        task.clicked.connect(lambda checked=False, m=mid: self._controller.create_task_from_mail(m))
+        buttons.addWidget(task)
+        layout.addLayout(buttons)
         return widget
 
     def _fit_rows(self) -> None:

@@ -244,6 +244,12 @@ class ChatView(QWidget):
         self._add_message("Secretary:", message, "error", technical=message)
 
     @Slot()
+    def prefill(self, text: str) -> None:
+        """Put ``text`` in the input (the user finishes and sends it)."""
+        self._input.setText(text)
+        self._input.setFocus()
+        self._input.setCursorPosition(len(text))
+
     def _on_send(self) -> None:
         text = self._input.text().strip()
         if not text:

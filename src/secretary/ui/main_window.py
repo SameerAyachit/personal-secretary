@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
         self._controller.open_research_brief.connect(self._open_research_brief)
+        self._controller.draft_reply_requested.connect(self._prefill_chat)
         self._controller.inbox_changed.connect(self.refresh_tray)
 
     def _on_system_theme_changed(self, scheme: Qt.ColorScheme) -> None:
@@ -146,6 +147,16 @@ class MainWindow(QMainWindow):
                 self._rail.setCurrentRow(i)
                 break
         self._views["Research"].show_brief(brief_id)
+
+    @Slot(str)
+    def _prefill_chat(self, text: str) -> None:
+        """Open Chat with ``text`` ready in the input (from the Mail view)."""
+        for i in range(self._rail.count()):
+            if self._rail.item(i).data(Qt.UserRole) == "Chat":
+                self._rail.setCurrentRow(i)
+                break
+        self._stack.setCurrentWidget(self._views["Chat"])
+        self._views["Chat"].prefill(text)
 
     def _on_rail_changed(self, item: QListWidgetItem) -> None:
         if item is None:

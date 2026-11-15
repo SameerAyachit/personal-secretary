@@ -67,6 +67,7 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     research_status = Signal(str)  # research brief progress
     undo_available = Signal(list)  # [{token, label}] created by the finished turn
     open_research_brief = Signal(int)  # ask the main window to show this brief
+    draft_reply_requested = Signal(str)  # text to prefill in the chat input
     research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
     models_loaded = Signal(str, list)  # provider, models (for AI dropdown)
     connection_tested = Signal(str, dict)  # provider, result dict (for Test connection)
@@ -200,6 +201,33 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
             return self.conn.read(lambda c: messages_repo.list_triage_results(c, limit))
         except Exception:
             return []
+
+    def request_reply_draft(self, message_id: int) -> None:
+        """Ask the UI to open Chat with a reply prompt. Only the message id is used: the
+        email's own text is untrusted and must not reach the tool-using chat from here."""
+        self.draft_reply_requested.emit(f"Draft a reply to email #{int(message_id)} saying: ")
+
+    def create_task_from_mail(self, message_id: int) -> None:
+        """Add a follow-up task for a classified email (no LLM; a second click is a no-op)."""
+        try:
+            message = self.conn.read(lambda c: messages_repo.get(c, int(message_id)))
+            if message is None:
+                self.error.emit("task_create", "That email is no longer available.")
+                return
+            sender = (message.get("from_addr") or "").split("<")[0].strip().strip('"') or "sender"
+            title = f"Reply to {sender}: {(message.get('subject') or '(no subject)').strip()}"[:200]
+            if any(t["title"] == title for t in tasks_repo.list_open(self.conn)):
+                self.turn_status.emit(f"Task already exists: {title}")
+                return
+            self._turn_id += 1
+            tasks_repo.create(
+                self.conn, title=title, notes="", due_at=None, due_tz=None,
+                source="email", turn_id=f"manual-{self._turn_id}",
+            )
+            self.tasks_changed.emit()
+            self.turn_status.emit(f"Task created: {title}")
+        except Exception as exc:
+            self.error.emit("task_create", str(exc))
 
     def list_drafts(self) -> list[dict]:
         """Unsent email drafts for Approvals > Drafts."""
