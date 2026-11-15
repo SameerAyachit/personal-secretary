@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -239,10 +240,30 @@ class InboxView(QWidget):
         if status != "done":
             done = QPushButton("Done")
             done.setObjectName("Accent")
-            done.clicked.connect(lambda checked=False, i=iid: self._controller.done_inbox(i))
+            done.clicked.connect(lambda checked=False, i=iid: self._on_done(i))
             buttons.addWidget(done)
         layout.addLayout(buttons)
         return widget
+
+    def _ask_complete_task(self, task_title: str) -> bool | None:
+        """Ask whether to also complete the task: True yes, False no, None cancel."""
+        answer = QMessageBox.question(
+            self, "Done",
+            f'This reminder is for the task "{task_title}". Mark the task as done too?',
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes,
+        )
+        if answer == QMessageBox.Cancel:
+            return None
+        return answer == QMessageBox.Yes
+
+    def _on_done(self, inbox_id: int) -> None:
+        task = self._controller.linked_task_for_inbox(inbox_id)
+        if task is None:
+            self._controller.done_inbox(inbox_id)
+            return
+        choice = self._ask_complete_task(task["title"])
+        if choice is not None:
+            self._controller.done_inbox(inbox_id, complete_task=choice)
 
     def _snooze_custom(self, inbox_id: int) -> None:
         """Ask for a time in the user's words ('in 3 hours', 'friday 9am'); code resolves it."""

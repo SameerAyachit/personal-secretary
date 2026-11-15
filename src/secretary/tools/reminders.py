@@ -27,6 +27,7 @@ from secretary.timeparse.recurrence import (
 from secretary.timeparse.when import AmbiguousTime, PastTime, resolve_when
 from secretary.tools.idempotency import idempotency_key
 from secretary.tools.registry import SafetyClass, ToolSpec
+from secretary.tools.tasks import _resolve_ref
 from secretary.tools.timeerrors import time_error
 
 _DEDUPE_WINDOW_SECONDS = 60
@@ -44,6 +45,7 @@ class ReminderCreateArgs(BaseModel):
         None, description="Recurrence rule, e.g. 'every weekday at 8:30'"
     )
     priority: int = Field(0, description="Priority (0 normal, 1 high)")
+    task_ref: str | None = Field(None, description="Task id or title this reminder is for")
     tz: str = Field(default_factory=default_timezone, description="Time zone for the reminder")
 
 
@@ -101,6 +103,13 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
         return time_error(exc, parsed.when_text)
     fire_utc = fire_local.astimezone(UTC)
 
+    task_id = None
+    if parsed.task_ref:
+        task, problem = _resolve_ref(conn, parsed.task_ref, open_only=True)
+        if task is None:
+            return problem or {"error": "task not found"}
+        task_id = task["id"]
+
     existing = _dedupe_existing(conn, parsed.title, fire_utc)
     if existing is not None:
         return {
@@ -141,7 +150,7 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
     try:
         reminder_id = reminders_repo.create(
             conn,
-            task_id=None,
+            task_id=task_id,
             title=parsed.title,
             body="",
             kind=kind,

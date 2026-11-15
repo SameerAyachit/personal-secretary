@@ -65,6 +65,18 @@ def list_all(con: sqlite3.Connection, *, status: str | None = None, limit: int =
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def open_task_for_inbox(con: sqlite3.Connection, inbox_id: int) -> dict | None:
+    """The still-open task that the reminder behind an inbox item belongs to, if any."""
+    cur = con.execute(
+        "SELECT t.* FROM inbox i JOIN reminders r ON r.id = i.reminder_id "
+        "JOIN tasks t ON t.id = r.task_id "
+        "WHERE i.id=? AND t.deleted_at IS NULL AND t.status='open'",
+        (inbox_id,),
+    )
+    row = cur.fetchone()
+    return row_to_dict(cur, row) if row else None
+
+
 def update(
     con: sqlite3.Connection,
     task_id: int,

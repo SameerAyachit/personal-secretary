@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- A reminder can belong to a task (`reminder_create` takes `task_ref`: an id or title). Pressing Done on its Inbox item asks "Mark the task as done too?" (Yes / No / Cancel); items without a task are done without a question.
 - Email replies stay in their thread (migration 012): `email_draft` with `reply_to_ref` links the draft to the original (subject defaults to "Re: ..."), the approval summary says it is a reply, and the approved send carries the Gmail `threadId` plus `In-Reply-To`/`References` (per the Gmail API threads guide).
 - `python -m tests.eval.live`: a live eval against the configured model using the app's real tool schemas (runbook: `docs/eval_runbook.md`). The eval cases now use the real tool names and cover read queries and repeating events (42 cases); they previously named tools that no longer exist.
 - Diagnostics warn about a leftover plaintext `google_token.json` in the data folder (never read or printed).

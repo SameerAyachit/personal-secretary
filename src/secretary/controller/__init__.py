@@ -336,10 +336,24 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
             return []
 
 
-    def done_inbox(self, inbox_id: int) -> None:
+    def linked_task_for_inbox(self, inbox_id: int) -> dict | None:
+        """The open task behind this inbox item's reminder, if any."""
+        try:
+            return self.conn.read(lambda c: tasks_repo.open_task_for_inbox(c, inbox_id))
+        except Exception:
+            return None
+
+    def done_inbox(self, inbox_id: int, complete_task: bool = False) -> None:
+        task = self.linked_task_for_inbox(inbox_id) if complete_task else None
         inbox_repo.update(self.conn, inbox_id, status="done")
+        if task is not None:
+            self._turn_id += 1
+            tasks_repo.update(self.conn, task["id"], status="done",
+                              completed_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                              turn_id=f"manual-{self._turn_id}")
+            self.tasks_changed.emit()
         self.inbox_changed.emit()
-        self.turn_status.emit("Inbox item done.")
+        self.turn_status.emit("Inbox item done." if task is None else "Inbox item and task done.")
 
     # ---- Slots in -------------------------------------------------------
     @Slot(str, str)
