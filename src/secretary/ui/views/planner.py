@@ -89,6 +89,11 @@ class PlannerView(QWidget):
 
         layout.addStretch()
 
+    def plan_today(self) -> None:
+        """Show today's free slots (used by the Today screen's "Plan my day")."""
+        self._date.setText(_today_iso(self._tz))
+        self._plan()
+
     @Slot()
     def _plan(self) -> None:
         self._slots.clear()

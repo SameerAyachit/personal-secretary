@@ -14,7 +14,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from zoneinfo import ZoneInfo
 
@@ -395,6 +395,62 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         except Exception:
             return []
 
+
+    def today_agenda(self) -> list[dict]:
+        """Today's events and due tasks for the Today screen, in time order (plan 12.2).
+
+        Order: overdue tasks, all-day events, then timed events and tasks by clock time.
+        Each entry: ``{kind: event|task, id, title, time}`` where ``time`` is ``HH:MM``,
+        ``All day`` or ``Overdue``. "Today" is the user's local day.
+        """
+        tz_name = load_config().app.timezone or "UTC"
+        zone = ZoneInfo(tz_name)
+        now_local = datetime.now(UTC).astimezone(zone)
+        today = now_local.date()
+
+        def local(value: str | None) -> datetime | None:
+            try:
+                moment = datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=UTC)
+            return moment.astimezone(zone)
+
+        entries: list[tuple[tuple, dict]] = []
+        try:
+            # A two-day margin each side: stored offsets are mixed, so compare dates in Python.
+            lo = (now_local - timedelta(days=2)).astimezone(UTC).isoformat(timespec="seconds")
+            hi = (now_local + timedelta(days=2)).astimezone(UTC).isoformat(timespec="seconds")
+            for event in events_repo.list_window(self.conn, start_at=lo, end_at=hi):
+                start = local(event["start_at"])
+                if start is None or start.date() != today:
+                    continue
+                all_day = bool(event["all_day"])
+                key = (1, start) if all_day else (2, start)
+                entries.append((key, {
+                    "kind": "event", "id": event["id"], "title": event["title"],
+                    "time": "All day" if all_day else start.strftime("%H:%M"),
+                }))
+        except Exception:
+            logger.exception("today agenda: events unavailable")
+        try:
+            rows = {r["id"]: r for r in filter_tasks(self.conn, "today", None, tz_name)}
+            rows.update({r["id"]: r for r in filter_tasks(self.conn, "overdue", None, tz_name)})
+            for task in rows.values():
+                due = local(task.get("due_at"))
+                if due is None:
+                    continue
+                if due.date() < today:
+                    entries.append(((0, due), {"kind": "task", "id": task["id"], "title": task["title"], "time": "Overdue"}))
+                elif due.date() == today:
+                    entries.append(((2, due), {
+                        "kind": "task", "id": task["id"], "title": task["title"], "time": due.strftime("%H:%M"),
+                    }))
+        except Exception:
+            logger.exception("today agenda: tasks unavailable")
+        entries.sort(key=lambda pair: pair[0])
+        return [entry for _key, entry in entries]
 
     def linked_task_for_inbox(self, inbox_id: int) -> dict | None:
         """The open task behind this inbox item's reminder, if any."""

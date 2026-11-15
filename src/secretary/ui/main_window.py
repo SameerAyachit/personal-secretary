@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self._stack, 1)
         root.addWidget(content, 1)
 
+        self._views["Today"].navigate_requested.connect(self._navigate)
         self._controller.update_found.connect(self._show_update)
         self._show_update(self._controller.update_info())
 
@@ -198,6 +199,19 @@ class MainWindow(QMainWindow):
                 self._rail.setCurrentRow(i)
                 break
         self._views["Research"].show_brief(brief_id)
+
+    @Slot(str)
+    def _navigate(self, label: str) -> None:
+        """Switch to a view by its rail label; "Planner" also plans today (Today > Plan my day)."""
+        for i in range(self._rail.count()):
+            if self._rail.item(i).data(Qt.UserRole) == label:
+                self._rail.setCurrentRow(i)
+                break
+        view = self._views.get(label)
+        if view is not None:
+            self._stack.setCurrentWidget(view)
+            if label == "Planner":
+                view.plan_today()
 
     @Slot(str)
     def _prefill_chat(self, text: str) -> None:
