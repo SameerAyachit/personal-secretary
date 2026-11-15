@@ -109,3 +109,23 @@ def test_diagnose_reports_each_key_individually(monkeypatch, tmp_path, capsys):
     assert "NVIDIA API key [OK]" in out
     assert "Gemini API key [WARN] missing" in out
     assert "Google refresh token [WARN] missing" in out
+
+
+def test_diagnose_warns_about_a_plaintext_token_file_without_printing_it(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(d, "credential_candidates", lambda: [tmp_path / "credentials.json"])
+    monkeypatch.setattr(d, "get_secret", lambda name: "present")
+    (tmp_path / "google_token.json").write_text('{"refresh_token": "SECRET-VALUE"}', encoding="utf-8")
+    code = d.run_diagnose()
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "google_token.json" in out and "plaintext" in out.lower()
+    assert "SECRET-VALUE" not in out
+
+
+def test_diagnose_is_quiet_when_no_plaintext_token_file_exists(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SECRETARY_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(d, "credential_candidates", lambda: [tmp_path / "credentials.json"])
+    monkeypatch.setattr(d, "get_secret", lambda name: "present")
+    d.run_diagnose()
+    assert "plaintext" not in capsys.readouterr().out.lower()

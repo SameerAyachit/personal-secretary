@@ -7,7 +7,8 @@ Exit code semantics:
 - FAIL (exit 1): Python version, config load, keyring importable,
   store connects, tzdata.
 - WARN (exit 0 unless a FAIL is present): missing NVIDIA/Gemini keys,
-  missing Google refresh token, missing credentials.json.
+  missing Google refresh token, missing credentials.json, a leftover plaintext
+  google_token.json in the data folder.
 
 Every check line carries a marker: [OK], [WARN] or [FAIL].
 Secret values are never printed.
@@ -18,7 +19,7 @@ from __future__ import annotations
 import sys
 from zoneinfo import ZoneInfo
 
-from .paths import credential_candidates
+from .paths import credential_candidates, data_root
 from .secrets import get_secret
 
 
@@ -109,6 +110,15 @@ def run_diagnose() -> int:
             oks.append(f"{label} [OK]")
         else:
             warns.append(f"{label} [WARN] missing")
+
+    # Secrets live only in the Credential Manager (AGENTS.md). An old plaintext token file
+    # is reported, never read or printed, and never deleted by the app.
+    leftover = data_root() / "google_token.json"
+    if leftover.exists():
+        warns.append(
+            f"Plaintext secret file [WARN] {leftover} is not used by this version; "
+            "secrets belong in Credential Manager. Check it and delete it if it is a leftover"
+        )
 
     # LLM model configured for the active provider (never print the key value)
     try:

@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- `python -m tests.eval.live`: a live eval against the configured model using the app's real tool schemas (runbook: `docs/eval_runbook.md`). The eval cases now use the real tool names and cover read queries and repeating events (42 cases); they previously named tools that no longer exist.
+- Diagnostics warn about a leftover plaintext `google_token.json` in the data folder (never read or printed).
 - Repeating events in chat (ADR-007, migration 011): "focus on my course every day 4pm to 6pm" creates a rolling 30-day window of events (pushed to Google Calendar like any event) and the scheduler keeps topping it up. Works for every day / weekday / week / month rules; Undo removes the occurrences not yet on Google. `scripts/check_utc_bug.py` lists chat-made reminders/events from before the absolute-time fix so you can re-set late ones.
 - Chat can now finish the task lifecycle (plan §8.5): `task_update`, `task_complete`, `task_delete` (soft delete), and `task_list` honours its `open|today|tomorrow|week|overdue|done|search` filters. A task reference is an id or title fragment; if a fragment matches several tasks the tool returns the candidates and changes nothing. Bulk delete is not offered (ambiguity is asked, never guessed).
 - Mail view (new left-rail item): lists the Gmail messages the triage job classified, with category, urgency and suggested action. Read-only.
