@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -230,6 +231,9 @@ class InboxView(QWidget):
             action.triggered.connect(
                 lambda checked=False, i=iid, c=choice: self._controller.snooze_inbox(i, c.lower())
             )
+        menu.addAction("Custom...").triggered.connect(
+            lambda checked=False, i=iid: self._snooze_custom(i)
+        )
         snooze.setMenu(menu)
         buttons.addWidget(snooze)
         if status != "done":
@@ -239,6 +243,14 @@ class InboxView(QWidget):
             buttons.addWidget(done)
         layout.addLayout(buttons)
         return widget
+
+    def _snooze_custom(self, inbox_id: int) -> None:
+        """Ask for a time in the user's words ('in 3 hours', 'friday 9am'); code resolves it."""
+        text, accepted = QInputDialog.getText(
+            self, "Snooze", "Snooze until (e.g. 'in 3 hours' or 'tomorrow 8am'):"
+        )
+        if accepted and text.strip():
+            self._controller.snooze_inbox(inbox_id, text.strip())
 
     def _fit_rows(self) -> None:
         """Give each row the height its wrapped content needs at the current width."""

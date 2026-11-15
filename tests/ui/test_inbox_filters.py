@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QInputDialog, QPushButton
 
 from secretary.controller import Controller
 from secretary.store.db import Connection, migrations_folder
@@ -105,7 +105,7 @@ def test_view_can_switch_filter_and_change_a_choice(qapp):
         conn.close()
 
 
-def test_snooze_button_offers_three_durations(qapp):
+def test_snooze_button_offers_three_durations_and_custom(qapp):
     conn = _conn()
     try:
         controller = Controller(conn)
@@ -113,7 +113,7 @@ def test_snooze_button_offers_three_durations(qapp):
         view = InboxView(controller)
         snooze = _buttons(view)["Snooze"]
         labels = [a.text() for a in snooze.menu().actions()]
-        assert labels == ["10 minutes", "1 hour", "Tomorrow 9am"]
+        assert labels == ["10 minutes", "1 hour", "Tomorrow 9am", "Custom..."]
         snooze.menu().actions()[1].trigger()
         assert inbox_repo.get(conn, iid)["status"] == "snoozed"
     finally:
@@ -129,5 +129,28 @@ def test_empty_text_depends_on_filter(qapp):
         view._filter_buttons["done"].click()
         assert view._empty.isVisible()
         assert "done" in view._empty._title.text().lower()
+    finally:
+        conn.close()
+
+
+def test_snooze_menu_has_a_custom_entry_that_uses_the_typed_text(qapp, monkeypatch):
+    conn = _conn()
+    try:
+        controller = Controller(conn)
+        iid = _add(conn)
+        view = InboxView(controller)
+        snooze = _buttons(view)["Snooze"]
+        labels = [a.text() for a in snooze.menu().actions()]
+        assert labels[-1].startswith("Custom")
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("in 3 hours", True)))
+        snooze.menu().actions()[-1].trigger()
+        assert inbox_repo.get(conn, iid)["status"] == "snoozed"
+        assert inbox_repo.get(conn, iid)["snoozed_until"]
+        # Cancelling the dialog leaves the item alone.
+        controller.reopen_inbox(iid)
+        view.refresh()
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("", False)))
+        _buttons(view)["Snooze"].menu().actions()[-1].trigger()
+        assert inbox_repo.get(conn, iid)["status"] == "unacknowledged"
     finally:
         conn.close()

@@ -22,6 +22,7 @@ from secretary.ui.views import (
     chat,
     events,
     inbox,
+    mail,
     planner,
     research,
     settings,
@@ -32,6 +33,7 @@ from secretary.util.main_thread_watchdog import MainThreadWatchdog
 
 _RAIL_TOOLTIPS = {
     "Inbox": "Notification log: reminders, research briefs and email results",
+    "Mail": "Gmail messages the assistant has classified (read-only)",
     "Approvals": "Emails drafted by the assistant and actions waiting for your OK",
 }
 
@@ -76,7 +78,7 @@ class MainWindow(QMainWindow):
         self._rail = QListWidget()
         self._rail.setFixedWidth(200)
         self._rail.setFrameStyle(0)  # no frame
-        for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Approvals", "Planner", "Research", "Settings"):
+        for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Mail", "Approvals", "Planner", "Research", "Settings"):
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, label)
             if label in _RAIL_TOOLTIPS:
@@ -99,6 +101,7 @@ class MainWindow(QMainWindow):
             "Tasks": tasks.TasksView(controller),
             "Calendar": events.EventsView(controller),
             "Inbox": inbox.InboxView(controller),
+            "Mail": mail.MailView(controller),
             "Approvals": approvals.ApprovalsView(controller),
             "Planner": planner.PlannerView(controller),
             "Research": research.ResearchView(controller),

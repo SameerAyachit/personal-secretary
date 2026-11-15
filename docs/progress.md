@@ -152,3 +152,9 @@ All review bugs (BUGs 1-8) and all code-buildable plan work (A–F) are DONE. Al
 - Email: Approvals > Drafts, recipient-based approval summary, real Gmail send behind approval (ADR-005), views refresh on open and after each turn.
 - Inbox: New/Snoozed/Acknowledged/Done/All filters, Reopen, snooze choices.
 - Gate: ruff clean, pytest all passed, lint-imports 7 kept / 0 broken. Live Gmail send is verified by the user in the real app (not sent by the assistant).
+
+## Remaining-work pass (2026-11-15, later)
+- Added: task_update/complete/delete + filters, note_add/note_search (migration 009), event_update with Google patch, claim guard for all actions, Undo (migration 010), Mail (triage) view, custom snooze; fixed absolute-time UTC bug and empty events export.
+- Decided: quiet hours dropped (ADR-006). The reminder-to-task Done prompt is moot: no reminder is ever linked to a task.
+- Gate: ruff clean, pytest all passed, lint-imports 7 kept / 0 broken.
+- Left for the user: items A2-A6 in docs/human_todo.md (rebuild/installer test, live eval, Google production mode, soak, signing, release).

@@ -194,6 +194,13 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
                 row["body"] = payload.get("body", "")
         return rows
 
+    def list_triage(self, limit: int = 50) -> list[dict]:
+        """Classified Gmail messages (category / urgency / suggested action), newest first."""
+        try:
+            return self.conn.read(lambda c: messages_repo.list_triage_results(c, limit))
+        except Exception:
+            return []
+
     def list_drafts(self) -> list[dict]:
         """Unsent email drafts for Approvals > Drafts."""
         try:

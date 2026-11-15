@@ -4,6 +4,9 @@
 
 ### Added
 - Chat can now finish the task lifecycle (plan §8.5): `task_update`, `task_complete`, `task_delete` (soft delete), and `task_list` honours its `open|today|tomorrow|week|overdue|done|search` filters. A task reference is an id or title fragment; if a fragment matches several tasks the tool returns the candidates and changes nothing. Bulk delete is not offered (ambiguity is asked, never guessed).
+- Mail view (new left-rail item): lists the Gmail messages the triage job classified, with category, urgency and suggested action. Read-only.
+- Inbox snooze has a "Custom..." choice that takes a time in your own words ("in 3 hours", "tomorrow 8am").
+- Quiet hours are intentionally not built (ADR-006); the plan marks them optional and default-off.
 - Undo (plan §8.4; migration 010 `undo_entries`): when a chat turn adds/edits/completes/deletes a task, saves a note, sets or cancels a reminder, or creates an event, the chat shows an "Undo: ..." button under the reply. `Controller.undo` replays the recorded inverse; it is refused for a reminder that already fired and for an event already on Google Calendar, and a second click is a no-op.
 - `note_add` / `note_search` (plan §8.5; migration 009 `notes`): dictate free-form notes in chat and find them later; notes are included in the Settings > Data export.
 - `event_update` (class B, own events): change title, time, duration or location in chat. Edits to an event Google already has are sent with `events.patch` (verified against the Calendar API reference); new events still use `events.insert`. Ambiguous titles return candidates instead of guessing. Attendee changes remain unsupported.
