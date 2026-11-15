@@ -126,6 +126,11 @@ class SettingsView(QWidget):
         self._ai_model = QComboBox()
         self._ai_model.setAccessibleName("Model")
         self._ai_model.setEditable(True)
+        # Long model ids must not widen the whole page (it overflowed at 125% text).
+        self._ai_model.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._ai_model.setMinimumContentsLength(24)
+        self._ai_provider.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._ai_provider.setMinimumContentsLength(12)
         grid.addWidget(QLabel("Model"), 1, 0)
         grid.addWidget(self._ai_model, 1, 1)
         # The dropdown is usable straight away with the configured model; the
