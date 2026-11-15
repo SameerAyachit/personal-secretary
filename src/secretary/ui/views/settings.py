@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 from pathlib import Path
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -61,6 +61,7 @@ class SettingsView(QWidget):
         tabs.addTab(self._ai_tab(), "AI")
         tabs.addTab(self._google_tab(), "Google")
         tabs.addTab(self._data_tab(), "Data")
+        tabs.addTab(self._privacy_tab(), "Privacy")
         layout.addWidget(tabs)
         tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -113,6 +114,60 @@ class SettingsView(QWidget):
         update_note.setWordWrap(True)
         grid.addWidget(update_note, 3, 0, 1, 2)
         return card
+
+    # ------------------------------------------------------------------ Privacy
+
+    def _privacy_tab(self) -> QWidget:
+        card = QGroupBox("Privacy: what leaves this PC")
+        card.setObjectName("Card")
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 16, 16, 16)
+        box.setSpacing(10)
+        self._privacy_labels: list[QLabel] = []
+        for _ in range(7):
+            label = QLabel("")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            box.addWidget(label)
+            self._privacy_labels.append(label)
+        box.addStretch(1)
+        self.refresh_privacy()
+        return card
+
+    def refresh_privacy(self) -> None:
+        """Rebuild the Privacy text from the live configuration (code-built, never model text)."""
+        info = self._controller.get_privacy_info()
+        host = info["host"] or "your configured provider"
+        lines = [
+            f"AI provider ({info['provider']}, {host}): the text of your chat messages, and the tasks, "
+            "reminders, calendar events and email text the assistant reads to answer you, are sent to it. "
+            "This includes email text during Gmail triage and research briefs.",
+        ]
+        if info["nvidia_trial"]:
+            lines.append(
+                "NVIDIA trial terms: NVIDIA's trial endpoint records inputs and outputs and may use them to "
+                "improve its products. Do not use it for content that must stay private, or switch to a "
+                "provider whose terms you accept (Settings > AI)."
+            )
+        else:
+            lines.append(
+                f"Check the terms of {host}: Secretary cannot see whether it records or reuses what it receives."
+            )
+        lines += [
+            "Web search: queries go to DuckDuckGo when you search or run research; DuckDuckGo sees your IP address.",
+            "Google: only if you connect it. Calendar events are read and the events you create are written back; "
+            "Gmail is read for triage. An email is sent only after you press Approve in Approvals.",
+            (
+                "GitHub: once a day the app asks for the latest release number. The request is anonymous."
+                if info["update_check"]
+                else "GitHub: the update check is turned off; no request is made."
+            ),
+            "Kept on this PC: your data (one SQLite file), your keys (Windows Credential Manager, never in files "
+            "or logs), and logs with email, web and calendar text redacted.",
+            "There is no telemetry, analytics or usage reporting. Full details are in PRIVACY.md.",
+        ]
+        for label, text in zip(self._privacy_labels, lines, strict=False):
+            label.setText(text)
 
     # ------------------------------------------------------------------ AI
 
@@ -187,6 +242,8 @@ class SettingsView(QWidget):
         """Request the model list the first time the AI tab is opened."""
         if index == 1 and not self._ai_models_requested:
             self._refresh_ai_models()
+        if index == 4:
+            self.refresh_privacy()  # reflects the provider and switches as they are now
 
     def _on_ai_provider_changed(self, text: str) -> None:
         self._refresh_ai_models()

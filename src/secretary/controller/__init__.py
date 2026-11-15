@@ -16,6 +16,7 @@ import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from functools import partial
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -343,6 +344,20 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         cfg = load_config()
         cfg.updates.check = enabled
         save_config(cfg)
+
+    def get_privacy_info(self) -> dict:
+        """Facts for Settings > Privacy: the active LLM host and whether it is NVIDIA's trial
+        endpoint (which records inputs and outputs), and the update-check switch. No secrets."""
+        cfg = load_config()
+        provider = cfg.llm.active
+        base_url = cfg.llm.providers[provider].base_url if provider in cfg.llm.providers else ""
+        host = urlparse(base_url).hostname or ""
+        return {
+            "provider": provider,
+            "host": host,
+            "nvidia_trial": host == "nvidia.com" or host.endswith(".nvidia.com"),
+            "update_check": cfg.updates.check,
+        }
 
     def update_info(self) -> dict | None:
         """The newer release to announce ({tag, url}), or None (off, current, or dismissed)."""
