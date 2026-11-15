@@ -32,6 +32,7 @@ from secretary.store.repos import inbox as inbox_repo
 from secretary.store.repos import messages as messages_repo
 from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
+from secretary.store.repos import research_briefs as briefs_repo
 from secretary.store.repos import tasks as tasks_repo
 from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.planning import plan_day
@@ -102,6 +103,13 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         """Return open tasks (for the UI to display)."""
         try:
             return tasks_repo.list_open(self.conn)
+        except Exception:
+            return []
+
+    def list_research_briefs(self, limit: int = 20) -> list[dict]:
+        """Recent research briefs (running, done, failed), newest first, for the Research tab."""
+        try:
+            return self.conn.read(lambda c: briefs_repo.list_recent(c, limit))
         except Exception:
             return []
 

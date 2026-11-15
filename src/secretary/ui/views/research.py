@@ -7,7 +7,9 @@ signal; the actual research runs on the worker loop, never on the GUI thread.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Slot
+import json
+
+from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
@@ -55,6 +57,19 @@ class ResearchView(QWidget):
         self._error.setObjectName("Caption")
         layout.addWidget(self._error)
 
+        recent_label = QLabel("Recent briefs")
+        recent_label.setObjectName("Caption")
+        layout.addWidget(recent_label)
+        self._recent = QListWidget()
+        self._recent.setMaximumHeight(120)
+        self._recent.currentRowChanged.connect(self._on_recent_selected)
+        layout.addWidget(self._recent)
+        self._rows: list[dict] = []
+        # Chat-started briefs finish in the background: poll while this tab is visible.
+        self._poll = QTimer(self)
+        self._poll.setInterval(4000)
+        self._poll.timeout.connect(self.refresh)
+
         self._brief = QTextEdit()
         self._brief.setReadOnly(True)
         self._brief.setPlaceholderText("The brief will appear here with inline source links.")
@@ -70,6 +85,46 @@ class ResearchView(QWidget):
         controller.research_status.connect(self._status.setText)
         controller.research_brief_finished.connect(self._on_finished)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refresh()
+        self._poll.start()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._poll.stop()
+
+    def refresh(self) -> None:
+        """Reload the recent-briefs list, keeping the selected brief selected."""
+        selected = self._recent.currentRow()
+        selected_id = self._rows[selected]["id"] if 0 <= selected < len(self._rows) else None
+        self._rows = self._controller.list_research_briefs()
+        self._recent.blockSignals(True)
+        self._recent.clear()
+        for row in self._rows:
+            self._recent.addItem(QListWidgetItem(f"[{row['status']}] {row['topic']}  ({row['created_at'][:16].replace('T', ' ')})"))
+            if row["id"] == selected_id:
+                self._recent.setCurrentRow(self._recent.count() - 1)
+        self._recent.blockSignals(False)
+
+    def _on_recent_selected(self, index: int) -> None:
+        if not 0 <= index < len(self._rows):
+            return
+        row = self._rows[index]
+        self._sources.clear()
+        self._error.setText("")
+        self._status.setText("")
+        if row["status"] == "running":
+            self._brief.setPlainText("")
+            self._status.setText(f"Still researching '{row['topic']}'... this tab updates by itself.")
+        elif row["status"] == "failed":
+            self._brief.setPlainText("")
+            self._error.setText(row.get("error") or "Research failed.")
+        else:
+            self._brief.setPlainText(row.get("brief") or "No brief could be written.")
+            for i, source in enumerate(json.loads(row.get("sources_json") or "[]"), 1):
+                self._sources.addItem(QListWidgetItem(f"[{i}] {source.get('title') or source.get('url', '')}  {source.get('url', '')}"))
+
     def _start(self) -> None:
         self._run_btn.setEnabled(False)
         self._brief.clear()
@@ -80,6 +135,7 @@ class ResearchView(QWidget):
     @Slot(object)
     def _on_finished(self, result: dict) -> None:
         self._run_btn.setEnabled(True)
+        self.refresh()
         self._status.setText("")
         error = result.get("error") if isinstance(result, dict) else None
         if error:
