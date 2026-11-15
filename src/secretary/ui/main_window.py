@@ -135,6 +135,8 @@ class MainWindow(QMainWindow):
         if view is not None:
             if label == "Settings":
                 view.refresh_autostart()
+            elif hasattr(view, "refresh"):
+                view.refresh()  # never show a stale list when navigating
             self._stack.setCurrentWidget(view)
 
     def hide_to_tray(self) -> None:

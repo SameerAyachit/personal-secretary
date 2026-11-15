@@ -146,3 +146,9 @@ All review bugs (BUGs 1-8) and all code-buildable plan work (A–F) are DONE. Al
 
 ## Test count (verified by running pytest, 2026-11-09)
 - python -m pytest --collect-only : 232 collected items; python -m pytest -q : 232 passed.
+
+## Research, email and inbox fixes (2026-11-15)
+- Research: ddgs key mapping, background jobs (migration 008), metered LLM calls, 429 retry, Research tab recent briefs.
+- Email: Approvals > Drafts, recipient-based approval summary, real Gmail send behind approval (ADR-005), views refresh on open and after each turn.
+- Inbox: New/Snoozed/Acknowledged/Done/All filters, Reopen, snooze choices.
+- Gate: ruff clean, pytest all passed, lint-imports 7 kept / 0 broken. Live Gmail send is verified by the user in the real app (not sent by the assistant).

@@ -41,6 +41,20 @@ class ApprovalsView(QWidget):
         self._list.setFrameStyle(0)  # no frame
         layout.addWidget(self._list)
 
+        self._drafts_title = QLabel("Drafts")
+        self._drafts_title.setObjectName("Section")
+        layout.addWidget(self._drafts_title)
+        self._drafts_hint = QLabel(
+            "Emails the assistant drafted. Nothing is sent until you request a send "
+            "and then approve it above."
+        )
+        self._drafts_hint.setObjectName("Caption")
+        self._drafts_hint.setWordWrap(True)
+        layout.addWidget(self._drafts_hint)
+        self._drafts = QListWidget()
+        self._drafts.setFrameStyle(0)
+        layout.addWidget(self._drafts)
+
         self._controller.approvals_changed.connect(self.refresh)
         self.refresh()
 
@@ -58,6 +72,65 @@ class ApprovalsView(QWidget):
             item.setData(Qt.UserRole, row["id"])
             self._list.addItem(item)
             self._list.setItemWidget(item, self._row_widget(row))
+        self._refresh_drafts()
+
+    def _refresh_drafts(self) -> None:
+        self._drafts.clear()
+        try:
+            drafts = self._controller.list_drafts()
+        except Exception:
+            drafts = []
+        self._drafts_title.setVisible(bool(drafts))
+        self._drafts_hint.setVisible(bool(drafts))
+        self._drafts.setVisible(bool(drafts))
+        for draft in drafts:
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, draft["id"])
+            self._drafts.addItem(item)
+            widget = self._draft_widget(draft)
+            item.setSizeHint(widget.sizeHint())
+            self._drafts.setItemWidget(item, widget)
+
+    def _draft_widget(self, draft: dict) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        subject = QLabel(draft["subject"] or "(no subject)")
+        subject.setObjectName("Body")
+        layout.addWidget(subject)
+        to = QLabel("To: " + (", ".join(draft["recipients"]) or "(no recipient)"))
+        to.setObjectName("Caption")
+        layout.addWidget(to)
+        preview = draft["body"].strip().replace("\n", " ")
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        if preview:
+            body = QLabel(preview)
+            body.setObjectName("Caption")
+            body.setWordWrap(True)
+            layout.addWidget(body)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        if draft["send_requested"]:
+            pending = QLabel("Send request pending: approve it above")
+            pending.setObjectName("Caption")
+            buttons.addWidget(pending)
+        else:
+            request = QPushButton("Request send")
+            request.setAccessibleName(f"Request send {draft['subject']}")
+            request.clicked.connect(
+                lambda checked=False, did=draft["id"]: self._controller.queue_draft_send(did)
+            )
+            buttons.addWidget(request)
+        discard = QPushButton("Discard")
+        discard.setAccessibleName(f"Discard draft {draft['subject']}")
+        discard.clicked.connect(
+            lambda checked=False, did=draft["id"]: self._controller.discard_draft(did)
+        )
+        buttons.addWidget(discard)
+        layout.addLayout(buttons)
+        return widget
 
     def _row_widget(self, row: dict) -> QWidget:
         widget = QWidget()

@@ -220,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         scheduler.start()
         controller.set_scheduler(scheduler)
+        controller.set_gmail_client(gmail_client)
 
         window.quick_capture = quick_capture
         if args.minimized:

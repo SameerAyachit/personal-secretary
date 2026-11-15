@@ -20,6 +20,8 @@
 - `pending_actions.expired_retention_days`: the scheduler sweeper deletes expired actions older than that.
 
 ### Changed
+- Approving a send now really sends the email through Gmail (`users.messages.send`, existing `gmail.compose` scope), off the GUI thread, after re-verifying the draft; the result (sent or the reason it failed) lands in the Inbox. Only the first approval click can send. See ADR-005.
+- Chat research runs as a background job (migration 008, `research_briefs`): the chat answers at once, the brief appears in the Research tab (recent briefs list) and the Inbox when ready. Background jobs left running by a crash are marked failed at startup.
 - LLM provider switched from Groq to NVIDIA NIM (ADR-004): default `nvidia` provider (`https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3-ultra-550b-a55b`, key `llm_api_key:nvidia`), limiter defaults 40 requests/min and 10,000/day. New `llm.thinking` (default false) controls Nemotron thinking via `chat_template_kwargs.enable_thinking`; `OpenAICompatClient` gained a generic `extra_body`, and inline `<think>` traces are stripped from replies. `nvapi-` keys are redacted in logs.
 - `Controller` split into mixins (`controller/data.py`, `controller/google.py`, `controller/llm_settings.py`); the public API is unchanged. `get_active_llm_key` still imports from `secretary.controller`.
 
@@ -30,6 +32,9 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- Research: web search found no sources because `ddgs` returns `href`/`body` (the provider read `link`/`snippet`); a "No results found" answer no longer counts against the circuit breaker; searches and page fetches no longer block the shared worker loop; research LLM calls now go through the rate limiter (`MeteredClient`) and a provider HTTP 429 is retried (honouring `Retry-After`) instead of failing; saving the provider in Settings now also reaches research.
+- Email: a drafted email never appeared in Approvals (the view was never refreshed after a chat turn or on navigation) and chat talked about a non-existent "outbox". Views now refresh when opened and after every turn; drafts are listed under Approvals > Drafts with Request send / Discard; the approval summary names the real recipient and subject (it used to say "to me").
+- Inbox: choosing Ack/Snooze/Done made the item vanish with no way back. The Inbox has New / Snoozed / Acknowledged / Done / All filters, every row can be changed (including Reopen), and Snooze offers 10 minutes, 1 hour or tomorrow 9am.
 - Settings > AI: the model dropdown stayed disabled and empty (the list was only requested when the provider *changed*), so saving the provider stored an empty model. It is now usable immediately with the configured model, loads the provider's list the first time the AI tab opens, and keeps your selection when the list arrives.
 - A rejected API key (HTTP 401/403) now shows "The AI provider rejected the API key. Open Settings > AI and enter a valid key." instead of the raw provider error.
 - Cancelled reminders still fired (and were counted by catch-up) because the due query ignored `deleted_at`.

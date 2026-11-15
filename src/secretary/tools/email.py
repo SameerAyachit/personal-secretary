@@ -116,7 +116,10 @@ def email_draft(conn: Connection, turn_id: str, args: dict) -> dict:
         "to": parsed.to,
         "subject": parsed.subject,
         "status": "draft",
-        "note": "Draft saved; not sent.",
+        "note": (
+            "Draft saved; not sent. It is listed under Approvals > Drafts, where the user "
+            "can request the send and approve it."
+        ),
     }
 
 
@@ -177,6 +180,21 @@ def triage_run(conn: Connection, turn_id: str, args: dict) -> dict:
     }
 
 
+def _recipients(draft: dict) -> list[str]:
+    try:
+        value = json.loads(draft.get("to_addrs") or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _send_summary(draft: dict) -> str:
+    """Code-built approval summary from the draft's real recipients and subject."""
+    to = ", ".join(_recipients(draft)) or "(no recipient)"
+    subject = (draft.get("subject") or "").strip() or "(no subject)"
+    return f'Send "{subject}" to {to}'
+
+
 class EmailSendArgs(BaseModel):
     draft_ref: str = Field(..., description="Draft to send")
 
@@ -203,7 +221,7 @@ def email_send_prepare(conn: Connection, turn_id: str, args: dict) -> dict:
         "subject": draft["subject"],
         "body": draft["body"],
     }
-    summary = f"Send email draft {parsed.draft_ref} to {draft['from_addr']}"
+    summary = _send_summary(draft)
     pending_id = pa_repo.create(
         conn,
         kind="email.send",
@@ -257,7 +275,10 @@ def register(registry) -> None:
             name="email_draft",
             group="email",
             safety_class=SafetyClass.B,
-            description="Save an email draft (does not send)",
+            description=(
+                "Save an email draft (does not send). Drafts appear in Approvals > Drafts; "
+                "there is no outbox."
+            ),
             args_model=EmailDraftArgs,
             fn=email_draft,
         )
@@ -267,7 +288,10 @@ def register(registry) -> None:
             name="email_send",
             group="email",
             safety_class=SafetyClass.C,
-            description="Send an email draft (requires approval)",
+            description=(
+                "Ask to send a saved draft. Nothing is sent until the user approves it in "
+                "the Approvals view."
+            ),
             args_model=EmailSendArgs,
             fn=email_send_prepare,
         )

@@ -9,8 +9,10 @@ Controller, which is allowed to import ``store`` per the layering contract.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import threading
 import uuid
 from datetime import UTC, datetime
 from functools import partial
@@ -25,6 +27,7 @@ from secretary.config import default_timezone, load_config, save_config
 from secretary.controller.data import DataMixin
 from secretary.controller.google import GoogleMixin
 from secretary.controller.llm_settings import LLMSettingsMixin, get_active_llm_key
+from secretary.integrations.google.gmail import GmailError, GmailPermissionError
 from secretary.store.db import Connection
 from secretary.store.repos import chat as chat_repo
 from secretary.store.repos import events as events_repo
@@ -35,10 +38,16 @@ from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import research_briefs as briefs_repo
 from secretary.store.repos import tasks as tasks_repo
 from secretary.timeparse.when import extract_when_phrase, resolve_when
+from secretary.tools.email import email_send_prepare
 from secretary.tools.planning import plan_day
 from secretary.tools.research import run_research_job
 
 logger = logging.getLogger(__name__)
+
+
+def _run_in_thread(fn) -> None:
+    """Run ``fn`` on a daemon thread so network I/O never blocks the GUI thread."""
+    threading.Thread(target=fn, daemon=True).start()
 
 
 class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
@@ -84,6 +93,8 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         # operations can stop them before wiping the DB (plan E18).
         self._scheduler = None
         self._worker = None
+        self._gmail = None
+        self._run_background = _run_in_thread
 
     def _new_turn_id(self, prefix: str = "turn") -> str:
         """Globally unique turn id (never repeats across launches).
@@ -96,6 +107,10 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
 
     def set_scheduler(self, scheduler) -> None:
         self._scheduler = scheduler
+
+    def set_gmail_client(self, gmail) -> None:
+        """Gmail client used to send approved emails (None until Google connects)."""
+        self._gmail = gmail
 
     def set_worker(self, worker) -> None:
         self._worker = worker
@@ -113,10 +128,10 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         except Exception:
             return []
 
-    def list_inbox(self) -> list[dict]:
-        """Return unacknowledged inbox items (for the UI to display)."""
+    def list_inbox(self, status: str | None = "unacknowledged") -> list[dict]:
+        """Inbox items with the given status (default: new ones); ``None`` returns all."""
         try:
-            return inbox_repo.list_unacknowledged(self.conn)
+            return inbox_repo.list_by_status(self.conn, status)
         except Exception:
             return []
 
@@ -175,6 +190,51 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
                 row["subject"] = payload.get("subject", "")
                 row["body"] = payload.get("body", "")
         return rows
+
+    def list_drafts(self) -> list[dict]:
+        """Unsent email drafts for Approvals > Drafts."""
+        try:
+            drafts = messages_repo.list_drafts(self.conn)
+            now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            waiting = pa_repo.list_waiting(self.conn, now_iso=now_iso)
+        except Exception:
+            return []
+        requested: set[str] = set()
+        for action in waiting:
+            if action["kind"] == "email.send":
+                with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                    requested.add(str(json.loads(action["payload_json"] or "{}").get("draft_ref")))
+        rows = []
+        for draft in drafts:
+            try:
+                recipients = json.loads(draft.get("to_addrs") or "[]")
+            except json.JSONDecodeError:
+                recipients = []
+            rows.append({
+                "id": draft["id"],
+                "recipients": recipients,
+                "subject": draft.get("subject") or "",
+                "body": draft.get("body") or "",
+                "send_requested": str(draft["id"]) in requested,
+            })
+        return rows
+
+    @Slot(int)
+    def queue_draft_send(self, draft_id: int) -> None:
+        """Ask for approval to send a draft (class C: nothing is sent yet)."""
+        if any(d["id"] == draft_id and d["send_requested"] for d in self.list_drafts()):
+            return
+        result = email_send_prepare(self.conn, "manual", {"draft_ref": str(draft_id)})
+        if "error" in result:
+            self.turn_status.emit(f"Could not request send: {result['error']}")
+            return
+        self.approvals_changed.emit()
+        self.turn_status.emit("Send requested. Approve it below to send the email.")
+
+    @Slot(int)
+    def discard_draft(self, draft_id: int) -> None:
+        self.conn.write(lambda c: messages_repo.discard_draft(c, int(draft_id), turn_id="manual"))
+        self.approvals_changed.emit()
 
     # ------------------------------------------------------------------ LLM provider
 
@@ -326,6 +386,10 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
             return
         self._store_chat_message("assistant", result or "", turn_id)
         self.events_changed.emit()  # the turn may have created calendar events
+        # A turn can also queue approvals, drafts, inbox items and tasks.
+        self.approvals_changed.emit()
+        self.inbox_changed.emit()
+        self.tasks_changed.emit()
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
 
     @Slot(str)
@@ -390,6 +454,16 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         inbox_repo.update(self.conn, inbox_id, status="acknowledged")
         self.inbox_changed.emit()
         self.turn_status.emit("Inbox item acknowledged.")
+
+    @Slot(int)
+    def reopen_inbox(self, inbox_id: int) -> None:
+        """Put an acknowledged, snoozed or done item back to New."""
+        inbox_repo.update(
+            self.conn, inbox_id, status="unacknowledged",
+            snoozed_until=None, acknowledged_at=None,
+        )
+        self.inbox_changed.emit()
+        self.turn_status.emit("Inbox item reopened.")
 
     @Slot(int, str)
     def snooze_inbox(self, inbox_id: int, snooze_text: str) -> None:
@@ -485,22 +559,21 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         self.turn_status.emit("Action rejected.")
 
     def _execute_send(self, pa: dict) -> None:
-        """Send an approved email draft after payload re-verification (plan §3.5).
+        """Send an approved email draft through Gmail (plan §3.5, ADR-005).
 
         Re-fetches the draft at send time and compares recipients/subject/body
-        against the snapshot approved earlier; refuses on any change. No real
-        transport exists yet (Gmail send is human-gated), so execution is
-        recorded as the pending action reaching "executed".
+        against the snapshot approved earlier; refuses on any change. Only the
+        first waiting -> approved transition proceeds, so a double click cannot
+        send twice. The network call runs off the GUI thread.
         """
         pending_id = int(pa["id"])
         try:
             payload = json.loads(pa["payload_json"] or "{}")
         except json.JSONDecodeError:
             payload = {}
-        draft_ref = payload.get("draft_ref")
         approved = {key: payload.get(key) for key in ("to", "subject", "body")}
         try:
-            draft_id = int(draft_ref)
+            draft_id = int(payload.get("draft_ref"))
         except (TypeError, ValueError):
             draft_id = None
         message = messages_repo.get(self.conn, draft_id) if draft_id is not None else None
@@ -512,17 +585,88 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
             or message.get("body") != approved.get("body")
         )
         if changed:
-            pa_repo.decide(
-                self.conn,
-                pending_id,
-                "failed",
-                turn_id="manual",
-                result_json=json.dumps({"reason": "draft changed since approval"}),
-            )
+            self._fail_send(pending_id, "draft changed since approval", from_waiting=True)
             self.turn_status.emit("Send refused: draft changed since approval.")
+            return
+        gmail = self._gmail
+        if gmail is None:
+            self._fail_send(
+                pending_id, "Google is not connected: connect Google in Settings, then approve again",
+                from_waiting=True,
+            )
+            self.turn_status.emit("Connect Google in Settings to send email.")
+            return
+        try:
+            to_addrs = [str(a) for a in json.loads(approved["to"] or "[]")]
+        except (TypeError, json.JSONDecodeError):
+            to_addrs = []
+        if not to_addrs:
+            self._fail_send(pending_id, "draft has no recipient", from_waiting=True)
+            self.turn_status.emit("Send refused: draft has no recipient.")
+            return
+        # Atomic claim: only one caller can move waiting -> approved.
+        if not pa_repo.decide(self.conn, pending_id, "approved", turn_id="manual"):
+            return
+        self.approvals_changed.emit()
+        self.turn_status.emit("Sending email...")
+        subject, body = approved["subject"] or "", approved["body"] or ""
+        self._run_background(
+            partial(self._send_worker, gmail, pending_id, draft_id, to_addrs, subject, body)
+        )
+
+    def _send_worker(
+        self, gmail, pending_id: int, draft_id: int | None, to_addrs, subject: str, body: str
+    ) -> None:
+        try:
+            result = gmail.send_message(to_addrs, subject, body)
+        except GmailPermissionError:
+            self._fail_send(
+                pending_id, "Reconnect Google in Settings (needs permission to send email)"
+            )
+            self.turn_status.emit("Could not send: reconnect Google in Settings.")
+            return
+        except GmailError as exc:
+            logger.warning("email send failed: %s", exc)
+            self._fail_send(pending_id, f"Gmail send failed: {exc}")
+            self.turn_status.emit("Sending failed. See Approvals for details.")
+            return
+        except Exception as exc:
+            logger.exception("email send crashed")
+            self._fail_send(pending_id, f"Unexpected error while sending: {exc}")
+            self.turn_status.emit("Sending failed. See Approvals for details.")
+            return
+        self.conn.write(
+            lambda c: pa_repo.finish(
+                c, pending_id, "executed", turn_id="manual",
+                result_json=json.dumps({"gmail_id": str((result or {}).get("id", ""))}),
+            )
+        )
+        if draft_id is not None:
+            self.conn.write(lambda c: messages_repo.mark_sent(c, draft_id, turn_id="manual"))
+        self._send_note(f"Email sent to {', '.join(to_addrs)}", f"Subject: {subject}")
+        self.approvals_changed.emit()
+        self.turn_status.emit(f"Email sent to {', '.join(to_addrs)}.")
+
+    def _fail_send(self, pending_id: int, reason: str, *, from_waiting: bool = False) -> None:
+        result = json.dumps({"reason": reason})
+        if from_waiting:
+            pa_repo.decide(self.conn, pending_id, "failed", turn_id="manual", result_json=result)
         else:
-            pa_repo.decide(self.conn, pending_id, "executed", turn_id="manual")
-            self.turn_status.emit("Approved, sending is not enabled yet.")
+            self.conn.write(
+                lambda c: pa_repo.finish(
+                    c, pending_id, "failed", turn_id="manual", result_json=result
+                )
+            )
+        self._send_note("Email was not sent", reason)
+        self.approvals_changed.emit()
+
+    def _send_note(self, title: str, body: str) -> None:
+        self.conn.write(
+            lambda c: inbox_repo.create(
+                c, kind="system", title=title, body=body, payload_json="{}", turn_id="manual"
+            )
+        )
+        self.inbox_changed.emit()
 
     # ---- Data: backups, restore, delete-all, export (plan §5.5, §941-942) ----
 

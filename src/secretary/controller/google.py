@@ -101,5 +101,6 @@ class GoogleMixin:
         write-back start immediately (plan D16).
         """
         gmail, calendar = build_clients(credentials_path())
+        self.set_gmail_client(gmail)
         if self._scheduler is not None:
             self._scheduler.set_google_clients(gmail, calendar)

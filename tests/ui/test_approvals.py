@@ -11,10 +11,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from secretary.controller import Controller
-from secretary.store.db import migrations_folder
+from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
 from secretary.store.repos import messages as messages_repo
 from secretary.tools.email import email_send_prepare
@@ -68,5 +68,43 @@ def test_approvals_view_empty_state(qapp):
         assert view._empty.isVisible()
         assert not view._title.isVisible()
         assert view._list.count() == 0
+    finally:
+        conn.close()
+
+
+def test_approvals_view_lists_drafts_with_actions(qapp):
+    raw = _conn()
+    db_path = raw.execute("PRAGMA database_list").fetchone()[2]
+    raw.close()
+    conn = Connection(Path(db_path))
+    try:
+        draft_id = messages_repo.create(
+            conn, from_addr="me", to_addrs='["ravi@example.com"]', subject="Lunch plan",
+            body="See you at noon", received_at="2026-11-09T09:00:00+00:00",
+            source="draft", turn_id="s")
+        controller = Controller(conn)
+        view = ApprovalsView(controller)
+        text = "".join(lbl.text() for lbl in view.findChildren(QLabel))
+        assert "Drafts" in text
+        assert "Lunch plan" in text
+        assert "ravi@example.com" in text
+        assert view._drafts.count() == 1
+
+        def live_buttons():
+            row = view._drafts.itemWidget(view._drafts.item(0))
+            return {b.text(): b for b in row.findChildren(QPushButton)}
+
+        buttons = live_buttons()
+        assert set(buttons) == {"Request send", "Discard"}
+        buttons["Request send"].click()
+        # The draft now has a waiting approval and the approvals list shows it.
+        assert view._list.count() == 1
+        row = view._drafts.itemWidget(view._drafts.item(0))
+        assert "Send request pending" in "".join(lbl.text() for lbl in row.findChildren(QLabel))
+        buttons = live_buttons()
+        assert "Request send" not in buttons
+        buttons["Discard"].click()
+        assert view._drafts.count() == 0
+        assert messages_repo.get(conn, draft_id) is None
     finally:
         conn.close()

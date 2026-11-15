@@ -128,6 +128,42 @@ def list_triage_results(con: sqlite3.Connection, limit: int = 50) -> list[dict]:
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def list_drafts(con: sqlite3.Connection, limit: int = 50) -> list[dict]:
+    """Unsent drafts, newest first."""
+    cur = con.execute(
+        "SELECT * FROM email_messages WHERE source='draft' AND deleted_at IS NULL "
+        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        (limit,),
+    )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def discard_draft(con: sqlite3.Connection, message_id: int, turn_id: str | None = None) -> bool:
+    """Soft-delete a draft (never touches received mail)."""
+    now = now_utc()
+    con.execute(
+        "UPDATE email_messages SET deleted_at=?, updated_at=? "
+        "WHERE id=? AND source='draft' AND deleted_at IS NULL",
+        (now, now, message_id),
+    )
+    if not con.execute("SELECT changes()").fetchone()[0]:
+        return False
+    action_log(con, turn_id, "deleted", "message", message_id, {"draft": True})
+    return True
+
+
+def mark_sent(con: sqlite3.Connection, message_id: int, turn_id: str | None = None) -> bool:
+    """A draft that was sent through Gmail becomes a sent message."""
+    con.execute(
+        "UPDATE email_messages SET source='sent', updated_at=? WHERE id=? AND source='draft'",
+        (now_utc(), message_id),
+    )
+    if not con.execute("SELECT changes()").fetchone()[0]:
+        return False
+    action_log(con, turn_id, "sent", "message", message_id, {})
+    return True
+
+
 def list_known_addresses(con: sqlite3.Connection) -> list[str]:
     """Addresses the user has already sent to or received from (message history)."""
     cur = con.execute(

@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
@@ -72,3 +73,28 @@ def test_tasks_quick_add_without_llm(qapp, controller):
     view.refresh()
     titles = [view._list.item(i).text() for i in range(view._list.count())]
     assert "submit the lab report" in titles
+
+
+def test_opening_a_view_refreshes_it(qapp, controller):
+    window = MainWindow(controller)
+    approvals = window._views["Approvals"]
+    calls: list[int] = []
+    approvals.refresh = lambda: calls.append(1)  # type: ignore[method-assign]
+    for row in range(window._rail.count()):
+        if window._rail.item(row).data(Qt.UserRole) == "Approvals":
+            window._rail.setCurrentRow(row)
+    assert calls == [1]
+
+
+def test_turn_done_refreshes_approvals_and_inbox(qapp, controller):
+    seen: list[str] = []
+    controller.approvals_changed.connect(lambda: seen.append("approvals"))
+    controller.inbox_changed.connect(lambda: seen.append("inbox"))
+    controller.tasks_changed.connect(lambda: seen.append("tasks"))
+
+    class _Done:
+        def result(self):
+            return "ok"
+
+    controller._on_turn_done("turn-x", _Done())
+    assert {"approvals", "inbox", "tasks"} <= set(seen)

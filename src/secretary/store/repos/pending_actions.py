@@ -66,6 +66,28 @@ def decide(
     return True
 
 
+def finish(
+    con: sqlite3.Connection,
+    pending_id: int,
+    status: str,
+    *,
+    turn_id: str | None = None,
+    result_json: str | None = None,
+) -> bool:
+    """Record the outcome of an approved action (approved -> executed/failed)."""
+    if status not in {"executed", "failed"}:
+        return False
+    con.execute(
+        "UPDATE pending_actions SET status=?, result_json=? WHERE id=? AND status='approved'",
+        (status, result_json, pending_id),
+    )
+    changed = con.execute("SELECT changes() AS c").fetchone()[0]
+    if not changed:
+        return False
+    action_log(con, turn_id, status, "pending_action", pending_id, {"result": result_json})
+    return True
+
+
 def expire_waiting(con: sqlite3.Connection, now_iso: str) -> int:
     """Expire waiting actions whose ``expires_at`` has passed; returns the count."""
     cur = con.execute(

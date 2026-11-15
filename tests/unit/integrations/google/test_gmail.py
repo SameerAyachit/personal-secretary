@@ -1,13 +1,20 @@
 """Gmail read client: Gmail API mocked with respx (no real credentials)."""
 from __future__ import annotations
 
+import base64
+import email
+import json
+
 import httpx
+import pytest
 
 from secretary.integrations.google.gmail import (
     GMAIL_API,
     GMAIL_MESSAGE_API,
+    GMAIL_SEND_API,
     GmailClient,
     GmailError,
+    GmailPermissionError,
     extract_body,
     extract_headers,
 )
@@ -93,3 +100,34 @@ def test_get_message_error(respx_mock):
     else:  # pragma: no cover - defensive
         raise AssertionError("expected GmailError")
     client._client.close()
+
+
+def test_send_message_posts_base64url_rfc2822(respx_mock):
+    route = respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(
+        return_value=httpx.Response(200, json={"id": "sent-1", "threadId": "t-1"})
+    )
+    client = GmailClient(_FakeAuth())
+    result = client.send_message(["ravi@example.com", "x@example.com"], "Hi there", "Body text")
+    assert result["id"] == "sent-1"
+    req = route.calls[0].request
+    assert req.headers["Authorization"] == "Bearer fake-token"
+    raw = json.loads(req.content)["raw"]
+    assert "=" not in raw or raw.endswith("=")  # base64url, padding tolerated
+    parsed = email.message_from_bytes(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    assert parsed["To"] == "ravi@example.com, x@example.com"
+    assert parsed["Subject"] == "Hi there"
+    assert parsed.get_payload(decode=True).decode().strip() == "Body text"
+
+
+def test_send_message_403_is_permission_error(respx_mock):
+    respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(
+        return_value=httpx.Response(403, json={"error": {"message": "insufficient"}})
+    )
+    with pytest.raises(GmailPermissionError):
+        GmailClient(_FakeAuth()).send_message(["a@b.com"], "s", "b")
+
+
+def test_send_message_other_failure_is_gmail_error(respx_mock):
+    respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(return_value=httpx.Response(500))
+    with pytest.raises(GmailError):
+        GmailClient(_FakeAuth()).send_message(["a@b.com"], "s", "b")
