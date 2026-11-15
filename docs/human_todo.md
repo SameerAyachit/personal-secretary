@@ -16,3 +16,14 @@ Each item is HUMAN-GATED; the app must work without the LLM and without Google c
    approvals_empty_light_100.png, approvals_empty_dark_100.png, approvals_with_item_light_100.png,
    approvals_with_item_dark_100.png against the secretary-ui-design checklist at 100% and
    150% scaling (regenerate 150% with QT_SCALE_FACTOR=1.5).
+
+## Before the first public release (added 2026-11-15)
+
+7. Run the live eval: `python -m tests.eval.live` (runbook: `docs/eval_runbook.md`); share the summary so model settings can be tuned.
+8. Check and delete `%LOCALAPPDATA%\Secretary\google_token.json` (plaintext leftover; the app no longer uses it) and the stale `llm_api_key:groq` / `llm_api_key:gemini` Credential Manager entries if you do not use them.
+9. Re-set any chat-made reminders or events created before the absolute-time fix (`python scripts/check_utc_bug.py` lists candidates).
+10. Run the A2-A6 checks, then the 7-day soak on a clean profile.
+11. Record `docs/demo.gif` (script in the README "Demo" section).
+12. Sign the installer if you want to avoid SmartScreen warnings.
+13. Bump the version (README "Building and releasing"), push the tag, review the draft Release and publish it. Edit the repository name in `[updates] repo` only if it differs from `SameerAyachit/personal-secretary`.
+14. Check the first GitHub Actions run of `ci.yml` (mypy scope and the `pip-audit` job could not be run locally) and `release.yml` on a throwaway tag.

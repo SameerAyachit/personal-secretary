@@ -33,12 +33,43 @@ opt into. No web server, no browser UI, no HTTP endpoints.
 - **Google (optional, bring your own credentials):** OAuth connect/reconnect, Calendar
   `events.list` sync on the primary calendar only (the granted scope), Gmail read for
   triage. `calendarList` is intentionally never called.
-- **Settings:** four tabs — General (theme, autostart), AI (provider, model, key),
-  Google (connect/reconnect, sync chip), Data (backup, restore, export, delete all).
+- **Today:** the day at a glance: reminders with Snooze/Done, approvals waiting, the
+  "While you were away" card, today's events and due tasks in time order, quick-add
+  (also understands "remind me ..."), and Plan my day.
+- **Settings:** five tabs — General (theme, autostart, daily update check), AI (provider,
+  model, key), Google (connect/reconnect, sync chip), Data (backup, restore, export,
+  delete all), Privacy (what is sent where, including NVIDIA's trial terms).
   Everything else lives in Diagnostics.
+- **Updates:** once a day the app asks GitHub for the latest release number (anonymous,
+  can be switched off) and shows an "Update available" banner. Nothing installs itself.
 - **Hardening:** main-thread heartbeat watchdog (plan C-27) dumps tracebacks if the GUI
   thread stalls; timezone change banner; log redaction; class-C actions (send, bulk delete)
   go through `pending_actions` with code-built summaries.
+
+## Demo
+
+A five-minute walkthrough that shows every main feature (needs an AI key in Settings > AI):
+
+1. **Chat > "remind me to stretch in 2 minutes"**: a reminder is created; Undo appears under the reply. When it fires you get a toast and an Inbox item with Snooze/Done.
+2. **Chat > "focus on my course every day 4pm to 6pm"**: a repeating series (30-day window) is created and shows in Calendar and, if Google is connected, in Google Calendar.
+3. **Tasks**: add one with quick-add, tick it, filter Overdue, search.
+4. **Mail** (Google connected): press Draft reply on a classified email; the draft lands in Approvals with the real recipient and subject; nothing is sent until you press Approve.
+5. **Today**: see reminders, approvals waiting, today's agenda; press Plan my day.
+6. **Settings > Privacy**: see exactly what leaves the PC.
+
+*Demo GIF: not recorded yet. Record it and save it as `docs/demo.gif`, then embed it here.*
+
+## Building and releasing
+
+```powershell
+powershell -File packaging\build.ps1              # PyInstaller build + --diagnose on the built exe
+powershell -File packaging\build.ps1 -Installer   # also builds the Inno Setup installer
+```
+
+Pushing a tag such as `v0.2.0` runs `.github/workflows/release.yml`: tests, build, `--diagnose`
+on the frozen exe, installer, SHA-256, and a **draft** GitHub Release for you to review and
+publish. Before tagging, bump the version in `pyproject.toml`, `src/secretary/__init__.py` and
+`packaging/version_info.txt`. Draft release notes: `docs/release_notes_draft.md`.
 
 ## Getting started
 
