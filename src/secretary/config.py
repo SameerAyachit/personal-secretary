@@ -32,7 +32,7 @@ _DEFAULTS: dict[str, Any] = {
         "providers": {
             "nvidia": {
                 "base_url": "https://integrate.api.nvidia.com/v1",
-                "primary_model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "primary_model": "nvidia/nemotron-3-ultra-550b-a55b",
                 "fallback_model": "",
                 "key_name": "llm_api_key:nvidia",
             },

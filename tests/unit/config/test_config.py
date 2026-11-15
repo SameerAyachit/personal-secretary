@@ -12,7 +12,7 @@ def test_load_config_returns_defaults(tmp_path, monkeypatch):
     assert cfg.llm.active == "nvidia"
     assert cfg.llm.history_messages == 8
     assert cfg.llm.providers["nvidia"].base_url == "https://integrate.api.nvidia.com/v1"
-    assert cfg.llm.providers["nvidia"].primary_model == "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    assert cfg.llm.providers["nvidia"].primary_model == "nvidia/nemotron-3-ultra-550b-a55b"
     assert "groq" not in cfg.llm.providers
     assert cfg.llm.limits["nvidia_primary"].rpm == 40
     assert cfg.llm.limits["nvidia_primary"].rpd == 10000

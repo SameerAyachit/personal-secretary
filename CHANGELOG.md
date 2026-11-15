@@ -20,7 +20,7 @@
 - `pending_actions.expired_retention_days`: the scheduler sweeper deletes expired actions older than that.
 
 ### Changed
-- LLM provider switched from Groq to NVIDIA NIM (ADR-004): default `nvidia` provider (`https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3.5-super-vl-120b-a12b`, key `llm_api_key:nvidia`), limiter defaults 40 requests/min and 10,000/day. New `llm.thinking` (default false) controls Nemotron thinking via `chat_template_kwargs.enable_thinking`; `OpenAICompatClient` gained a generic `extra_body`, and inline `<think>` traces are stripped from replies. `nvapi-` keys are redacted in logs.
+- LLM provider switched from Groq to NVIDIA NIM (ADR-004): default `nvidia` provider (`https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3-ultra-550b-a55b`, key `llm_api_key:nvidia`), limiter defaults 40 requests/min and 10,000/day. New `llm.thinking` (default false) controls Nemotron thinking via `chat_template_kwargs.enable_thinking`; `OpenAICompatClient` gained a generic `extra_body`, and inline `<think>` traces are stripped from replies. `nvapi-` keys are redacted in logs.
 - `Controller` split into mixins (`controller/data.py`, `controller/google.py`, `controller/llm_settings.py`); the public API is unchanged. `get_active_llm_key` still imports from `secretary.controller`.
 
 ### Removed
@@ -30,6 +30,7 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- Settings > AI: the model dropdown stayed disabled and empty (the list was only requested when the provider *changed*), so saving the provider stored an empty model. It is now usable immediately with the configured model, loads the provider's list the first time the AI tab opens, and keeps your selection when the list arrives.
 - A rejected API key (HTTP 401/403) now shows "The AI provider rejected the API key. Open Settings > AI and enter a valid key." instead of the raw provider error.
 - Cancelled reminders still fired (and were counted by catch-up) because the due query ignored `deleted_at`.
 - Reminder/event/plan tools defaulted to Asia/Kolkata and let the model pick the timezone; they now use the configured timezone, which the agent loop pins and hides from the model.

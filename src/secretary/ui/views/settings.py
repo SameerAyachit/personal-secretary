@@ -55,12 +55,14 @@ class SettingsView(QWidget):
         title.setObjectName("Section")
         layout.addWidget(title)
 
+        self._ai_models_requested = False
         tabs = QTabWidget()
         tabs.addTab(self._general_tab(), "General")
         tabs.addTab(self._ai_tab(), "AI")
         tabs.addTab(self._google_tab(), "Google")
         tabs.addTab(self._data_tab(), "Data")
         layout.addWidget(tabs)
+        tabs.currentChanged.connect(self._on_tab_changed)
 
         self._controller.error.connect(self._on_controller_error)
         self._controller.models_loaded.connect(self._on_models_loaded)
@@ -124,14 +126,15 @@ class SettingsView(QWidget):
         self._ai_model = QComboBox()
         self._ai_model.setAccessibleName("Model")
         self._ai_model.setEditable(True)
-        self._ai_model.setPlaceholderText("loading…")
         grid.addWidget(QLabel("Model"), 1, 0)
         grid.addWidget(self._ai_model, 1, 1)
-        # Models are populated lazily (on provider change) via the
-        # models_loaded signal so SettingsView construction never makes a
-        # network call (plan B9). The dropdown starts disabled with a
-        # "loading…" placeholder and falls back to the configured model.
-        self._ai_model.setEnabled(False)
+        # The dropdown is usable straight away with the configured model; the
+        # provider's full list is requested lazily (first time the AI tab opens,
+        # or when the provider changes) so building the view never makes a
+        # network call (plan B9).
+        configured = llm["providers"].get(provider, {}).get("model", "")
+        if configured:
+            self._ai_model.addItem(configured)
 
         self._ai_key = QLineEdit()
         self._ai_key.setAccessibleName("API key")
@@ -162,6 +165,11 @@ class SettingsView(QWidget):
 
         return card
 
+    def _on_tab_changed(self, index: int) -> None:
+        """Request the model list the first time the AI tab is opened."""
+        if index == 1 and not self._ai_models_requested:
+            self._refresh_ai_models()
+
     def _on_ai_provider_changed(self, text: str) -> None:
         self._refresh_ai_models()
         self._refresh_ai_key_status()
@@ -169,35 +177,34 @@ class SettingsView(QWidget):
     def _refresh_ai_models(self) -> None:
         """Request the provider's models on the worker loop (plan B9).
 
-        The dropdown starts disabled with a "loading…" placeholder; results
-        arrive via the models_loaded signal and fall back to the configured
-        model on failure.
+        The dropdown stays usable while the list loads; results arrive via the
+        models_loaded signal and never replace the model you picked.
         """
+        self._ai_models_requested = True
         provider = self._ai_provider.currentText()
-        self._ai_model.setEnabled(False)
+        # Switching provider: show that provider's configured model meanwhile.
+        configured = self._controller.get_llm_config()["providers"].get(provider, {}).get("model", "")
         self._ai_model.blockSignals(True)
         self._ai_model.clear()
-        self._ai_model.addItem("loading…")
+        if configured:
+            self._ai_model.addItem(configured)
+        self._ai_model.setEnabled(True)
         self._ai_model.blockSignals(False)
-        # Kick off the async model listing on the worker loop.
         self._controller.get_available_models(provider)
 
     def _on_models_loaded(self, provider: str, models: list[str]) -> None:
-        """Populate the model dropdown when the worker loop finishes listing."""
+        """Fill the dropdown with the provider's models, keeping the current choice."""
         if provider != self._ai_provider.currentText():
             return  # stale result from a previous provider selection
+        configured = self._controller.get_llm_config()["providers"][provider]["model"] or ""
+        wanted = self._ai_model.currentText().strip() or configured
         self._ai_model.blockSignals(True)
-        self._ai_model.clear()
         if models:
+            self._ai_model.clear()
             self._ai_model.addItems(models)
-        # Ensure the configured/current model is present and selected.
-        cfg = self._controller.get_llm_config()
-        configured = cfg["providers"][provider]["model"] or ""
-        current = self._ai_model.currentText()
-        target = current or configured or ""
-        if target and target not in [self._ai_model.itemText(i) for i in range(self._ai_model.count())]:
-            self._ai_model.addItem(target)
-        self._ai_model.setCurrentText(target if target else self._ai_model.itemText(0))
+        if wanted and self._ai_model.findText(wanted) < 0:
+            self._ai_model.addItem(wanted)
+        self._ai_model.setCurrentText(wanted)
         self._ai_model.setEnabled(True)
         self._ai_model.blockSignals(False)
 
