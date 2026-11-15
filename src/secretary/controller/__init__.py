@@ -651,15 +651,22 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         self.approvals_changed.emit()
         self.turn_status.emit("Sending email...")
         subject, body = approved["subject"] or "", approved["body"] or ""
+        thread: dict[str, str] = {}
+        if message.get("reply_to_id"):
+            original = messages_repo.get(self.conn, int(message["reply_to_id"]))
+            if original is not None and original.get("google_message_id"):
+                thread = {"thread_id": original.get("thread_id") or "",
+                          "reply_to_google_id": original["google_message_id"]}
         self._run_background(
-            partial(self._send_worker, gmail, pending_id, draft_id, to_addrs, subject, body)
+            partial(self._send_worker, gmail, pending_id, draft_id, to_addrs, subject, body, thread)
         )
 
     def _send_worker(
-        self, gmail, pending_id: int, draft_id: int | None, to_addrs, subject: str, body: str
+        self, gmail, pending_id: int, draft_id: int | None, to_addrs, subject: str, body: str,
+        thread: dict[str, str] | None = None,
     ) -> None:
         try:
-            result = gmail.send_message(to_addrs, subject, body)
+            result = gmail.send_message(to_addrs, subject, body, **(thread or {}))
         except GmailPermissionError:
             self._fail_send(
                 pending_id, "Reconnect Google in Settings (needs permission to send email)"

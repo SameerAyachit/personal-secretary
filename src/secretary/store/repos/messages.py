@@ -27,15 +27,16 @@ def create(
     is_read: int = 0,
     source: str = "local",
     google_message_id: str | None = None,
+    reply_to_id: int | None = None,
     turn_id: str | None = None,
 ) -> int:
     now = now_utc()
     cur = con.execute(
         "INSERT INTO email_messages(thread_id, from_addr, to_addrs, subject, body, received_at, "
-        "is_read, source, google_message_id, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "is_read, source, google_message_id, reply_to_id, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (thread_id, from_addr, to_addrs, subject, body, received_at, is_read, source,
-         google_message_id, now, now),
+         google_message_id, reply_to_id, now, now),
     )
     mid = int(cur.lastrowid)
     action_log(con, turn_id, "created", "message", mid, {"subject": subject})

@@ -7,11 +7,14 @@ the agent loop wraps them as ``<untrusted>`` (Section 8.6).
 from __future__ import annotations
 
 import base64
+import logging
 from email.message import EmailMessage
 
 import httpx
 
 from secretary.integrations.google.auth import GoogleAuth
+
+logger = logging.getLogger(__name__)
 
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/{user_id}/messages"
 GMAIL_MESSAGE_API = (
@@ -59,10 +62,16 @@ class GmailClient:
         return response.json()
 
     def get_message(
-        self, user_id: str = "me", message_id: str = "", format: str = "full"
+        self,
+        user_id: str = "me",
+        message_id: str = "",
+        format: str = "full",
+        metadata_headers: list[str] | None = None,
     ) -> dict:
         """Return one message in full (headers + body parts)."""
-        params = {"format": format}
+        params: dict[str, str | list[str]] = {"format": format}
+        if metadata_headers:
+            params["metadataHeaders"] = metadata_headers
         url = GMAIL_MESSAGE_API.format(user_id=user_id, message_id=message_id)
         try:
             response = self._client.get(
@@ -73,19 +82,54 @@ class GmailClient:
             raise GmailError(f"Gmail API call failed: {exc}") from exc
         return response.json()
 
+    def _reply_headers(self, reply_to_google_id: str, user_id: str) -> tuple[str, str] | None:
+        """(Message-ID, References) of the message being answered, or None if unavailable."""
+        try:
+            original = self.get_message(
+                user_id, reply_to_google_id, format="metadata",
+                metadata_headers=["Message-ID", "References"],
+            )
+        except GmailError as exc:
+            logger.warning("could not read headers of the message being answered: %s", exc)
+            return None
+        headers = {k.lower(): v for k, v in extract_headers(original).items()}
+        message_id = headers.get("message-id", "").strip()
+        if not message_id:
+            return None
+        return message_id, headers.get("references", "").strip()
+
     def send_message(
-        self, to_addrs: list[str], subject: str, body: str, user_id: str = "me"
+        self,
+        to_addrs: list[str],
+        subject: str,
+        body: str,
+        user_id: str = "me",
+        thread_id: str | None = None,
+        reply_to_google_id: str | None = None,
     ) -> dict:
-        """Send a plain-text email (users.messages.send; needs gmail.compose/send scope)."""
+        """Send a plain-text email (users.messages.send; needs gmail.compose/send scope).
+
+        For a reply, ``thread_id`` puts the message in the thread and the original's
+        Message-ID goes into In-Reply-To/References; Gmail also needs a matching subject
+        (Gmail API threads guide).
+        """
         message = EmailMessage()
         message["To"] = ", ".join(to_addrs)
         message["Subject"] = subject
+        if reply_to_google_id:
+            ids = self._reply_headers(reply_to_google_id, user_id)
+            if ids is not None:
+                message["In-Reply-To"] = ids[0]
+                message["References"] = f"{ids[1]} {ids[0]}".strip()
         message.set_content(body)
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        payload: dict[str, str] = {"raw": raw}
+        if thread_id:
+            payload["threadId"] = thread_id
         url = GMAIL_SEND_API.format(user_id=user_id)
         try:
             response = self._client.post(
-                url, json={"raw": raw}, headers=self._auth.auth_header(), timeout=30.0
+                url, json=payload, headers=self._auth.auth_header(), timeout=30.0
             )
             if response.status_code in (401, 403):
                 raise GmailPermissionError(

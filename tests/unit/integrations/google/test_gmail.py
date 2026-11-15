@@ -131,3 +131,43 @@ def test_send_message_other_failure_is_gmail_error(respx_mock):
     respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(return_value=httpx.Response(500))
     with pytest.raises(GmailError):
         GmailClient(_FakeAuth()).send_message(["a@b.com"], "s", "b")
+
+
+def test_send_reply_sets_thread_id_and_reference_headers(respx_mock):
+    respx_mock.get(GMAIL_MESSAGE_API.format(user_id="me", message_id="gm-orig")).mock(
+        return_value=httpx.Response(200, json={"payload": {"headers": [
+            {"name": "Message-ID", "value": "<orig@mail.example>"},
+            {"name": "References", "value": "<first@mail.example>"},
+        ]}})
+    )
+    route = respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(
+        return_value=httpx.Response(200, json={"id": "sent-2", "threadId": "thr-9"})
+    )
+    GmailClient(_FakeAuth()).send_message(
+        ["ravi@example.com"], "Re: Lunch", "Yes", thread_id="thr-9", reply_to_google_id="gm-orig")
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["threadId"] == "thr-9"
+    parsed = email.message_from_bytes(base64.urlsafe_b64decode(sent["raw"] + "=" * (-len(sent["raw"]) % 4)))
+    assert parsed["In-Reply-To"] == "<orig@mail.example>"
+    assert parsed["References"] == "<first@mail.example> <orig@mail.example>"
+
+
+def test_send_reply_still_sends_in_the_thread_when_headers_cannot_be_fetched(respx_mock):
+    respx_mock.get(GMAIL_MESSAGE_API.format(user_id="me", message_id="gm-orig")).mock(
+        return_value=httpx.Response(404)
+    )
+    route = respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(
+        return_value=httpx.Response(200, json={"id": "sent-3"})
+    )
+    GmailClient(_FakeAuth()).send_message(
+        ["a@b.com"], "Re: x", "b", thread_id="thr-9", reply_to_google_id="gm-orig")
+    sent = json.loads(route.calls[0].request.content)
+    assert sent["threadId"] == "thr-9"
+
+
+def test_plain_send_has_no_thread_id(respx_mock):
+    route = respx_mock.post(GMAIL_SEND_API.format(user_id="me")).mock(
+        return_value=httpx.Response(200, json={"id": "sent-4"})
+    )
+    GmailClient(_FakeAuth()).send_message(["a@b.com"], "s", "b")
+    assert "threadId" not in json.loads(route.calls[0].request.content)

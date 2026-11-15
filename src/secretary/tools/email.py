@@ -51,7 +51,7 @@ class EmailDraftArgs(BaseModel):
     to: str = Field(..., description="Recipient address")
     subject: str = Field("", description="Subject line; may be empty if the user wants none")
     body: str = Field(..., description="Body text")
-    reply_to_ref: str | None = Field(None, description="Message id this replies to")
+    reply_to_ref: str | None = Field(None, description="Id of the email this replies to, to reply in its thread")
 
 
 def email_search(conn: Connection, turn_id: str, args: dict) -> dict:
@@ -101,20 +101,34 @@ def email_read(conn: Connection, turn_id: str, args: dict) -> dict:
 def email_draft(conn: Connection, turn_id: str, args: dict) -> dict:
     """Record a draft (class B: draft only, no send)."""
     parsed = EmailDraftArgs(**args)
+    subject, thread_id, reply_to_id = parsed.subject, "", None
+    if parsed.reply_to_ref:
+        try:
+            original = messages_repo.get(conn, int(parsed.reply_to_ref))
+        except ValueError:
+            return {"error": "reply_to_ref must be the id of an email (integer)"}
+        if original is None or original.get("source") == "draft":
+            return {"error": "the email to reply to was not found"}
+        reply_to_id, thread_id = original["id"], original.get("thread_id") or ""
+        if not subject.strip():
+            base = (original.get("subject") or "").strip()
+            subject = base if base.lower().startswith("re:") else f"Re: {base}".strip()
     message_id = messages_repo.create(
         conn,
+        thread_id=thread_id,
         from_addr="me",
         to_addrs=json.dumps([parsed.to]),
-        subject=parsed.subject,
+        subject=subject,
         body=parsed.body,
         received_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         source="draft",
+        reply_to_id=reply_to_id,
         turn_id=turn_id,
     )
     return {
         "draft_id": message_id,
         "to": parsed.to,
-        "subject": parsed.subject,
+        "subject": subject,
         "status": "draft",
         "note": (
             "Draft saved; not sent. It is listed under Approvals > Drafts, where the user "
@@ -192,7 +206,8 @@ def _send_summary(draft: dict) -> str:
     """Code-built approval summary from the draft's real recipients and subject."""
     to = ", ".join(_recipients(draft)) or "(no recipient)"
     subject = (draft.get("subject") or "").strip() or "(no subject)"
-    return f'Send "{subject}" to {to}'
+    suffix = " (reply in the same thread)" if draft.get("reply_to_id") else ""
+    return f'Send "{subject}" to {to}{suffix}'
 
 
 class EmailSendArgs(BaseModel):
