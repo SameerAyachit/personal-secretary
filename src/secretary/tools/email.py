@@ -49,7 +49,7 @@ class EmailTriageArgs(BaseModel):
 
 class EmailDraftArgs(BaseModel):
     to: str = Field(..., description="Recipient address")
-    subject: str = Field(..., description="Subject line")
+    subject: str = Field("", description="Subject line; may be empty if the user wants none")
     body: str = Field(..., description="Body text")
     reply_to_ref: str | None = Field(None, description="Message id this replies to")
 

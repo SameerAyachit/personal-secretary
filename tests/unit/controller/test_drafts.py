@@ -104,3 +104,19 @@ def test_sent_draft_leaves_drafts_list():
         assert messages_repo.get(conn, draft_id)["source"] == "sent"
     finally:
         conn.close()
+
+
+def test_discarding_a_draft_withdraws_its_waiting_send_request():
+    conn = _conn()
+    try:
+        controller = Controller(conn)
+        draft_id = _draft(conn)
+        controller.queue_draft_send(draft_id)
+        assert len(controller.list_pending_actions()) == 1
+        controller.discard_draft(draft_id)
+        assert controller.list_pending_actions() == []
+        actions = pa_repo.list_waiting(conn, now_iso="2000-01-01T00:00:00Z")
+        assert actions == []
+        assert pa_repo.get(conn, 1)["status"] == "rejected"
+    finally:
+        conn.close()

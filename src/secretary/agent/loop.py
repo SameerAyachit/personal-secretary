@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -46,6 +47,26 @@ SYSTEM_PROMPT = (
     "passing the user's own words in when_text. Use memory_remember/memory_forget for "
     "remembered facts; facts are user-visible and never ground truth for actions."
 )
+
+
+_EMAIL_WORDS = re.compile(r"\b(e-?mail|mail|draft)\b", re.IGNORECASE)
+_DONE_WORDS = re.compile(r"\b(saved|sent|queued|created|drafted|prepared)\b", re.IGNORECASE)
+_EMAIL_CLAIM_NUDGE = (
+    "You said an email was saved or sent, but you called no tool this turn, so nothing "
+    "was done. Call email_draft now (the subject may be empty), or tell the user plainly "
+    "that you have not done it yet."
+)
+_EMAIL_CLAIM_FALLBACK = (
+    "I haven't saved or sent anything yet. Tell me who it is for and what it should say "
+    "(a subject is optional) and I'll save it as a draft under Approvals > Drafts."
+)
+
+
+def _claims_email_action(text: str) -> bool:
+    """True when a reply states that an email was saved/sent (a claim, not a question)."""
+    if not text or "?" in text:
+        return False
+    return bool(_EMAIL_WORDS.search(text) and _DONE_WORDS.search(text))
 
 
 def _estimate_tokens(messages: list[dict], tools: list[dict]) -> int:
@@ -145,6 +166,8 @@ async def run_turn(
     start = time.monotonic()
     seen_call_keys: list[str] = []
     recent_sigs: list[str] = []
+    tool_ran = False
+    nudged = False
     cfg = load_config()
     max_steps = cfg.llm.max_steps or MAX_STEPS
     timeout_s = cfg.llm.turn_timeout_seconds or TURN_TIMEOUT_SECONDS
@@ -198,6 +221,15 @@ async def run_turn(
             if resp.finish_reason == "length":
                 return ("I ran out of output room before finishing my answer. "
                         "Try asking a shorter question, or I can continue in parts.")
+            if not tool_ran and _claims_email_action(resp.text):
+                # The model claimed an email action without doing it. Give it one
+                # chance to really call the tool, then answer honestly.
+                if not nudged:
+                    nudged = True
+                    messages.append({"role": "assistant", "content": resp.text})
+                    messages.append({"role": "user", "content": _EMAIL_CLAIM_NUDGE})
+                    continue
+                return _EMAIL_CLAIM_FALLBACK
             return resp.text or "I'm not sure how to help with that."
 
         # Dedupe identical calls within this turn.
@@ -222,6 +254,7 @@ async def run_turn(
         for call in calls:
             logger.info("chat turn %s: tool call %s", turn_id, call.name)
             result = await _execute_call(call, registry, conn, turn_id, tz=ctx.get("tz"))
+            tool_ran = True
             messages.append(
                 {
                     "role": "assistant",

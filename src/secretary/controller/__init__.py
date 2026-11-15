@@ -234,6 +234,14 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     @Slot(int)
     def discard_draft(self, draft_id: int) -> None:
         self.conn.write(lambda c: messages_repo.discard_draft(c, int(draft_id), turn_id="manual"))
+        # A waiting send request for this draft must not outlive it.
+        now_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for action in pa_repo.list_waiting(self.conn, now_iso=now_iso):
+            if action["kind"] != "email.send":
+                continue
+            with contextlib.suppress(json.JSONDecodeError, AttributeError):
+                if str(json.loads(action["payload_json"] or "{}").get("draft_ref")) == str(draft_id):
+                    pa_repo.decide(self.conn, int(action["id"]), "rejected", turn_id="manual")
         self.approvals_changed.emit()
 
     # ------------------------------------------------------------------ LLM provider
