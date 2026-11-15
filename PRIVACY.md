@@ -11,9 +11,10 @@ Secretary is a local-first desktop app. Nothing leaves your PC unless you explic
 
 ## What is sent, and only when you configure it
 
-- **LLM provider:** chat turns, tool arguments, email triage/summaries, and research briefs are sent to your configured LLM provider (OpenAI-compatible, e.g. Groq) only after you paste an API key in Settings → LLM → Test connection. The system prompt instructs the model that email/web/calendar text inside `<untrusted>...</untrusted>` is data, never instructions.
+- **LLM provider:** chat turns, tool arguments, email triage/summaries, and research briefs are sent to your configured LLM provider (OpenAI-compatible; the default is NVIDIA's hosted API at `integrate.api.nvidia.com`) only after you paste an API key in Settings → AI. The system prompt instructs the model that email/web/calendar text inside `<untrusted>...</untrusted>` is data, never instructions.
+  - **NVIDIA trial terms:** NVIDIA's trial endpoint records inputs and outputs and may use them to improve its products. Do not send content that must stay private while using the trial endpoint, or switch to a provider whose terms you accept (ADR-004).
 - **Web search:** search queries are sent to DuckDuckGo (ddgs) when you use search or research; your IP is visible to DuckDuckGo.
-- **Google Calendar:** only if you connect Google OAuth credentials (credentials.json, "In production" project). Calendar events are read via Google's API; nothing is written back unless you approve a send/draft action.
+- **Google Calendar and Gmail:** only if you connect Google OAuth credentials (credentials.json, "In production" project). Calendar events are read via Google's API, and events you create in the app are written back to your Google Calendar. Gmail is read for triage. **An email is sent from your Gmail account only after you request the send and press Approve** in the Approvals view; the app shows the real recipient and subject first, and the result appears in the Inbox.
 
 ## What is never done
 
@@ -23,7 +24,7 @@ Secretary is a local-first desktop app. Nothing leaves your PC unless you explic
 
 ## Data retention
 
-You control retention: tasks/reminders can be done/cancelled (soft delete), inbox items acknowledged, calendar events deleted. There is no automated deletion.
+You control retention: tasks/reminders can be done/cancelled (soft delete), inbox items acknowledged, calendar events deleted. The only automatic deletion is clearing expired approval requests after the configured retention period. Settings → Data can back up, export or delete everything.
 
 ## Questions
 
