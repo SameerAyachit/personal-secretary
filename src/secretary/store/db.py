@@ -42,10 +42,11 @@ class Connection:
         self._con = sqlite3.connect(str(self._path), isolation_level=None,
                                     check_same_thread=False)
         self._con.row_factory = sqlite3.Row
-        if readonly:
-            self._con.execute("PRAGMA query_only=ON")
         _pragmas(self._con)
         _check_fts5(self._con)
+        if readonly:
+            # After the FTS5 probe, which creates a temp table query_only would refuse.
+            self._con.execute("PRAGMA query_only=ON")
 
     def write(self, fn):
         """Run ``fn`` inside a writer transaction (BEGIN IMMEDIATE / COMMIT)."""

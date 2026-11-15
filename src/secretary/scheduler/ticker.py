@@ -24,6 +24,7 @@ from PySide6.QtCore import QThread
 from secretary.config import load_config
 from secretary.integrations.google.calendar import push_pending_events, sync_calendar
 from secretary.scheduler.firing import advance, utc_iso
+from secretary.scheduler.series_job import extend_series
 from secretary.scheduler.triage_job import run_triage_job
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
@@ -202,6 +203,15 @@ def _calendar_step(conn: Connection, calendar_client, on_events_changed) -> None
             logger.exception("scheduler events-changed callback failed")
 
 
+def _series_step(conn: Connection, on_events_changed=None) -> None:
+    """Top up recurring events (ADR-007); a failure is logged and never stops the tick."""
+    try:
+        if extend_series(conn) and on_events_changed is not None:
+            on_events_changed()
+    except Exception:
+        logger.exception("scheduler series top-up failed")
+
+
 def tick(
     conn: Connection,
     on_fired=None,
@@ -251,6 +261,9 @@ def tick(
             )
     except Exception:
         logger.exception("scheduler triage job failed")
+    # Recurring events: keep the rolling window full, before the Calendar push so new
+    # occurrences go out in the same tick.
+    _series_step(conn, on_events_changed)
     # Calendar: push locally created events first (only when some are pending),
     # then read-sync at most every google.sync_minutes.
     if calendar_client is not None:

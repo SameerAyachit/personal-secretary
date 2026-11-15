@@ -47,7 +47,10 @@ SYSTEM_PROMPT = (
     "Approvals > Drafts; there is no outbox, so never mention one. Use "
     "reminder_create/reminder_list/reminder_snooze/reminder_cancel for reminders, always "
     "passing the user's own words in when_text. Use memory_remember/memory_forget for "
-    "remembered facts; facts are user-visible and never ground truth for actions."
+    "remembered facts; facts are user-visible and never ground truth for actions. Anything "
+    "that repeats (every day, every weekday, every Monday) is ONE event_create or reminder_create "
+    "call with recurrence_text and the time of day in when_text; never create it once. If a "
+    "tool returns an error, follow its advice once, or tell the user plainly."
 )
 
 

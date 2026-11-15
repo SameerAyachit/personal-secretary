@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from . import events as events_repo
 from ._base import action_log, now_utc, row_to_dict
 
 # Tables whose rows can be soft-deleted / restored by an undo.
@@ -66,6 +67,18 @@ def _soft_delete(con: sqlite3.Connection, table: str, row_id: int) -> tuple[bool
     return False, "Nothing to undo: it was already changed."
 
 
+def _soft_delete_series(con: sqlite3.Connection, series_id: str) -> tuple[bool, str]:
+    deleted, kept = events_repo.soft_delete_series(con, series_id)
+    if deleted and kept:
+        return True, (f"Removed {deleted} occurrences. {kept} already on Google Calendar: "
+                      "delete those there.")
+    if deleted:
+        return True, f"Undone: removed {deleted} occurrences."
+    if kept:
+        return False, "Those events are already on Google Calendar; delete them there."
+    return False, "Nothing to undo: it was already changed."
+
+
 def _restore(con: sqlite3.Connection, table: str, row_id: int) -> tuple[bool, str]:
     guard = " AND status='scheduled'" if table == "reminders" else ""
     con.execute(
@@ -103,6 +116,12 @@ def apply(con: sqlite3.Connection, entry_id: int) -> tuple[bool, str]:
     except json.JSONDecodeError:
         return False, "That undo entry is unreadable."
     op, table, row_id = inverse.get("op"), inverse.get("table"), inverse.get("id")
+    if op == "soft_delete_series" and table == "events" and isinstance(inverse.get("series_id"), str):
+        done, message = _soft_delete_series(con, inverse["series_id"])
+        if done:
+            con.execute("UPDATE undo_entries SET undone_at=? WHERE id=?", (now_utc(), entry_id))
+            action_log(con, entry["turn_id"], "undone", "events", 0, {"label": entry["label"]})
+        return done, message
     if not isinstance(row_id, int):
         return False, "That undo entry is invalid."
     if op == "soft_delete" and table in _SOFT_TABLES:

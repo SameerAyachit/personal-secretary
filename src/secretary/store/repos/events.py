@@ -22,12 +22,15 @@ def create(
     etag: str | None = None,
     sync_state: str = "synced",
     turn_id: str | None = None,
+    series_id: str | None = None,
+    recurrence_json: str | None = None,
 ) -> int:
     now = now_utc()
     cur = con.execute(
         "INSERT INTO events(title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, "
-        "sync_state, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-        (title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, sync_state, now, now),
+        "sync_state, series_id, recurrence_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, sync_state,
+         series_id, recurrence_json, now, now),
     )
     eid = int(cur.lastrowid)
     action_log(con, turn_id, "created", "event", eid, {"title": title})
@@ -118,3 +121,44 @@ def soft_delete_by_google_id(con: sqlite3.Connection, google_event_id: str) -> N
         "UPDATE events SET deleted_at=?, updated_at=? WHERE google_event_id=? AND deleted_at IS NULL",
         (now, now, google_event_id),
     )
+
+
+def series_overview(con: sqlite3.Connection) -> list[dict]:
+    """One entry per recurring series that still has a live occurrence.
+
+    ``last_start`` is the latest start over *all* rows (deleted ones included, so a
+    removed last occurrence is never regenerated); ``template`` is the latest live row.
+    """
+    cur = con.execute(
+        "SELECT series_id, MAX(start_at) AS last_start FROM events WHERE series_id IS NOT NULL "
+        "GROUP BY series_id HAVING SUM(deleted_at IS NULL) > 0"
+    )
+    heads = [(r[0], r[1]) for r in cur.fetchall()]
+    out: list[dict] = []
+    for series_id, last_start in heads:
+        cur = con.execute(
+            "SELECT * FROM events WHERE series_id=? AND deleted_at IS NULL ORDER BY start_at DESC LIMIT 1",
+            (series_id,),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            out.append({"series_id": series_id, "last_start": last_start, "template": row_to_dict(cur, row)})
+    return out
+
+
+def soft_delete_series(con: sqlite3.Connection, series_id: str) -> tuple[int, int]:
+    """Soft-delete the series' occurrences that are not on Google Calendar yet.
+
+    Returns ``(deleted, kept)``; ``kept`` are occurrences already synced to Google.
+    """
+    now = now_utc()
+    cur = con.execute(
+        "UPDATE events SET deleted_at=?, updated_at=? WHERE series_id=? AND deleted_at IS NULL "
+        "AND sync_state <> 'synced'",
+        (now, now, series_id),
+    )
+    deleted = cur.rowcount
+    kept = con.execute(
+        "SELECT COUNT(*) FROM events WHERE series_id=? AND deleted_at IS NULL", (series_id,)
+    ).fetchone()[0]
+    return deleted, int(kept)

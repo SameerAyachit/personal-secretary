@@ -20,7 +20,9 @@ from secretary.integrations.google.oauth import connected as google_connected
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import undo as undo_repo
-from secretary.timeparse.when import AmbiguousTime, PastTime, resolve_date, resolve_when
+from secretary.timeparse.recurrence import UnparseableRecurrence
+from secretary.timeparse.when import AmbiguousTime, PastTime, parse_when, resolve_date, resolve_when
+from secretary.tools import event_series
 from secretary.tools.registry import SafetyClass, ToolSpec
 from secretary.tools.timeerrors import time_error
 
@@ -51,6 +53,9 @@ class EventCreateArgs(BaseModel):
     location: str | None = Field(None, description="Optional location")
     tz: str = Field(default_factory=default_timezone, description="Time zone for the event")
     all_day: bool = Field(False, description="All-day event: when_text is a date and the event occupies the whole day")
+    recurrence_text: str | None = Field(
+        None, description="Repeat rule in the user's words, e.g. 'every day' or 'every weekday'"
+    )
 
 
 def _day_bounds(day_text: str, now: datetime, tz: str) -> tuple[datetime, datetime]:
@@ -61,9 +66,64 @@ def _day_bounds(day_text: str, now: datetime, tz: str) -> tuple[datetime, dateti
     return start_local, start_local + timedelta(days=1)
 
 
+def _create_series(conn: Connection, turn_id: str, parsed: EventCreateArgs, now: datetime) -> dict:
+    """Repeating event: a rolling window of occurrences (ADR-007)."""
+    if parsed.all_day:
+        return {
+            "error": "Repeating all-day events are not supported. Offer a timed repeating event instead.",
+            "user_message": "Repeating all-day events aren't supported yet. Give me a start time and I'll repeat that.",
+        }
+    try:
+        base = parse_when(parsed.when_text, now, parsed.tz)
+        rule = event_series.build_rule(parsed.recurrence_text or "", base, parsed.tz)
+    except UnparseableRecurrence as exc:
+        return time_error(exc, parsed.recurrence_text or "")
+    except AmbiguousTime as exc:
+        return time_error(exc, parsed.when_text)
+    duration = _duration_minutes(parsed.duration_text)
+    first = event_series.first_occurrence(rule, now)
+    horizon_end = now + timedelta(days=event_series.HORIZON_DAYS)
+    starts = [first, *event_series.occurrences_after(rule, first, horizon_end, event_series.MAX_OCCURRENCES - 1)]
+    first_utc = first.astimezone(UTC)
+    existing = [
+        r for r in events_repo.list_window(
+            conn, start_at=first_utc.isoformat(), end_at=(first_utc + timedelta(minutes=1)).isoformat())
+        if r["title"].strip().lower() == parsed.title.strip().lower() and r.get("series_id")
+    ]
+    if existing:
+        return {"series_id": existing[0]["series_id"], "event_id": existing[0]["id"], "title": parsed.title,
+                "note": "This repeating event already exists."}
+    conflicts = _overlapping_events(conn, first_utc, (first + timedelta(minutes=duration)).astimezone(UTC))
+    series_id = event_series.new_series_id()
+    ids = conn.write(
+        lambda con: event_series.insert_occurrences(
+            con, title=parsed.title, starts=starts, duration_minutes=duration, tz=parsed.tz,
+            location=parsed.location, series_id=series_id, rule=rule, turn_id=turn_id,
+        )
+    )
+    undo_repo.record(conn, turn_id, f"Created repeating event '{parsed.title}' ({len(ids)} occurrences)",
+                     {"op": "soft_delete_series", "table": "events", "series_id": series_id})
+    result = {
+        "series_id": series_id,
+        "event_id": ids[0],
+        "title": parsed.title,
+        "count": len(ids),
+        "repeats": parsed.recurrence_text,
+        "first_start": first.isoformat(),
+        "last_start": starts[-1].isoformat(),
+        "note": f"Created {len(ids)} occurrences up to {starts[-1].date().isoformat()}; more are added automatically.",
+        "google": "queued" if google_connected() else "not_connected",
+    }
+    if conflicts:
+        result["conflicts"] = conflicts
+    return result
+
+
 def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
     parsed = EventCreateArgs(**args)
     now = _utc_now()
+    if parsed.recurrence_text:
+        return _create_series(conn, turn_id, parsed, now)
     try:
         if parsed.all_day:
             start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
@@ -241,7 +301,7 @@ def register(registry) -> None:
             name="event_create",
             group="calendar",
             safety_class=SafetyClass.B,
-            description="Create a calendar event",
+            description="Create a calendar event, optionally repeating (recurrence_text, e.g. 'every day')",
             args_model=EventCreateArgs,
             fn=event_create,
         )

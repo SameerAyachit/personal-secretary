@@ -54,6 +54,21 @@ class RecurrenceRule:
     until: str | None = None
     count: int | None = None
 
+    @classmethod
+    def from_json(cls, data: dict) -> RecurrenceRule:
+        """Rebuild a rule stored with :meth:`to_json`."""
+        return cls(
+            freq=data["freq"],
+            interval=int(data.get("interval") or 1),
+            byweekday=list(data.get("byweekday") or []),
+            bymonthday=data.get("bymonthday"),
+            bymonth=data.get("bymonth"),
+            time=data.get("time") or "09:00",
+            tz=data.get("tz") or "Asia/Kolkata",
+            until=data.get("until"),
+            count=data.get("count"),
+        )
+
     def to_json(self) -> dict:
         return {
             "freq": self.freq,
