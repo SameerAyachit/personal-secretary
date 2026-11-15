@@ -21,8 +21,10 @@ opt into. No web server, no browser UI, no HTTP endpoints.
 - **Search & research (Phase 4):** web search (DuckDuckGo via ddgs, circuit breaker,
   cache), safe fetch (SSRF-safe, size cap), research briefs with per-source citations;
   unsupported claims are removed by a source-bound claim checker.
-- **Inbox & notifications:** reminders fire into the inbox with toasts and a tray badge,
-  catch-up on start, tray overflow hint ("+N more") when there are many unread items.
+- **Inbox & notifications:** the Inbox is the app's notification log (not a Gmail inbox):
+  fired reminders, finished research briefs (with an Open button), email send results and
+  "While you were away" summaries, each with a kind label and time, filterable by status.
+  Reminders also fire as toasts and a tray badge, catch-up on start, tray overflow hint ("+N more") when there are many unread items.
 - **Native shell:** system tray, global hotkey (Ctrl+Alt+Space) quick capture,
   `--minimized` tray start, autostart via Windows Run key (Settings toggle or installer).
 - **AI:** plug any OpenAI-compatible provider (NVIDIA NIM by default; Gemini/Ollama also work) via Settings; model

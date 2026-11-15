@@ -30,6 +30,11 @@ from secretary.ui.views import (
 )
 from secretary.util.main_thread_watchdog import MainThreadWatchdog
 
+_RAIL_TOOLTIPS = {
+    "Inbox": "Notification log: reminders, research briefs and email results",
+    "Approvals": "Emails drafted by the assistant and actions waiting for your OK",
+}
+
 
 class MainWindow(QMainWindow):
     """Single Secretary window. Closing hides to tray; tray Quit is the only exit."""
@@ -74,6 +79,8 @@ class MainWindow(QMainWindow):
         for label in ("Today", "Chat", "Tasks", "Calendar", "Inbox", "Approvals", "Planner", "Research", "Settings"):
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, label)
+            if label in _RAIL_TOOLTIPS:
+                item.setToolTip(_RAIL_TOOLTIPS[label])
             self._rail.addItem(item)
         self._rail.setCurrentRow(0)
         self._rail.currentItemChanged.connect(self._on_rail_changed)
@@ -102,6 +109,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self._stack)
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
+        self._controller.open_research_brief.connect(self._open_research_brief)
         self._controller.inbox_changed.connect(self.refresh_tray)
 
     def _on_system_theme_changed(self, scheme: Qt.ColorScheme) -> None:
@@ -126,6 +134,15 @@ class MainWindow(QMainWindow):
                 break
         self._stack.setCurrentWidget(self._views["Inbox"])
         self.show_window()
+
+    @Slot(int)
+    def _open_research_brief(self, brief_id: int) -> None:
+        """Switch to the Research tab and show one brief (from an Inbox item)."""
+        for i in range(self._rail.count()):
+            if self._rail.item(i).data(Qt.UserRole) == "Research":
+                self._rail.setCurrentRow(i)
+                break
+        self._views["Research"].show_brief(brief_id)
 
     def _on_rail_changed(self, item: QListWidgetItem) -> None:
         if item is None:

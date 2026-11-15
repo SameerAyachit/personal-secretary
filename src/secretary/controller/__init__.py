@@ -64,6 +64,7 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     google_connected = Signal()
     job_progress = Signal(str, int, str)
     research_status = Signal(str)  # research brief progress
+    open_research_brief = Signal(int)  # ask the main window to show this brief
     research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
     models_loaded = Signal(str, list)  # provider, models (for AI dropdown)
     connection_tested = Signal(str, dict)  # provider, result dict (for Test connection)
@@ -671,7 +672,8 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     def _send_note(self, title: str, body: str) -> None:
         self.conn.write(
             lambda c: inbox_repo.create(
-                c, kind="system", title=title, body=body, payload_json="{}", turn_id="manual"
+                c, kind="system", title=title, body=body,
+                payload_json=json.dumps({"email": True}), turn_id="manual"
             )
         )
         self.inbox_changed.emit()

@@ -125,7 +125,7 @@ def test_empty_text_depends_on_filter(qapp):
     try:
         view = InboxView(Controller(conn))
         view.show()
-        assert view._empty._title.text() == "No unacknowledged inbox items."
+        assert view._empty._title.text() .startswith("Nothing needs your attention")
         view._filter_buttons["done"].click()
         assert view._empty.isVisible()
         assert "done" in view._empty._title.text().lower()

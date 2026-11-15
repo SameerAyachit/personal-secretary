@@ -107,6 +107,15 @@ class ResearchView(QWidget):
                 self._recent.setCurrentRow(self._recent.count() - 1)
         self._recent.blockSignals(False)
 
+    def show_brief(self, brief_id: int) -> None:
+        """Select a brief in the recent list (used when opened from the Inbox)."""
+        self.refresh()
+        for index, row in enumerate(self._rows):
+            if row["id"] == brief_id:
+                self._recent.setCurrentRow(index)
+                self._on_recent_selected(index)
+                return
+
     def _on_recent_selected(self, index: int) -> None:
         if not 0 <= index < len(self._rows):
             return

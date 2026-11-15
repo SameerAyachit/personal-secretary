@@ -42,7 +42,7 @@ def test_inbox_view_empty_state(qapp):
         assert view._empty.isVisible()
         assert not view._list.isVisible()
         titles = [lbl.text() for lbl in view.findChildren(QLabel)]
-        assert "No unacknowledged inbox items." in titles
+        assert any(t.startswith("Nothing needs your attention") for t in titles)
     finally:
         conn.close()
 

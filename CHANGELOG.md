@@ -20,6 +20,7 @@
 - `pending_actions.expired_retention_days`: the scheduler sweeper deletes expired actions older than that.
 
 ### Changed
+- Inbox explains itself: a subtitle says it is the notification log, every row shows its kind (Reminder / Research / Email / While you were away / System) and local time, empty states say what will appear, research items have an Open button that jumps to the brief in the Research tab, and the left rail has tooltips for Inbox and Approvals.
 - Approving a send now really sends the email through Gmail (`users.messages.send`, existing `gmail.compose` scope), off the GUI thread, after re-verifying the draft; the result (sent or the reason it failed) lands in the Inbox. Only the first approval click can send. See ADR-005.
 - Chat research runs as a background job (migration 008, `research_briefs`): the chat answers at once, the brief appears in the Research tab (recent briefs list) and the Inbox when ready. Background jobs left running by a crash are marked failed at startup.
 - LLM provider switched from Groq to NVIDIA NIM (ADR-004): default `nvidia` provider (`https://integrate.api.nvidia.com/v1`, model `nvidia/nemotron-3-ultra-550b-a55b`, key `llm_api_key:nvidia`), limiter defaults 40 requests/min and 10,000/day. New `llm.thinking` (default false) controls Nemotron thinking via `chat_template_kwargs.enable_thinking`; `OpenAICompatClient` gained a generic `extra_body`, and inline `<think>` traces are stripped from replies. `nvapi-` keys are redacted in logs.
