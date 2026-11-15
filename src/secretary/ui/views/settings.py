@@ -99,6 +99,19 @@ class SettingsView(QWidget):
         self._autostart.setChecked(self._controller.get_autostart())
         self._autostart.toggled.connect(self._on_autostart_toggled)
         grid.addWidget(self._autostart, 1, 0, 1, 2)
+
+        self._update_check = QCheckBox("Check for updates once a day")
+        self._update_check.setAccessibleName("Check for updates")
+        self._update_check.setChecked(self._controller.get_update_check())
+        self._update_check.toggled.connect(self._controller.set_update_check)
+        grid.addWidget(self._update_check, 2, 0, 1, 2)
+        update_note = QLabel(
+            "Asks GitHub once a day for the latest release number. Nothing about you "
+            "or your data is sent, and nothing is installed automatically."
+        )
+        update_note.setObjectName("Caption")
+        update_note.setWordWrap(True)
+        grid.addWidget(update_note, 3, 0, 1, 2)
         return card
 
     # ------------------------------------------------------------------ AI

@@ -212,6 +212,17 @@ def _series_step(conn: Connection, on_events_changed=None) -> None:
         logger.exception("scheduler series top-up failed")
 
 
+def _update_step(conn: Connection, update_checker, on_update_found=None) -> None:
+    """Daily update check (plan 18.3). The checker decides whether one is due; it runs
+    in the scheduler thread, never the UI thread, and a failure never stops the tick."""
+    try:
+        found = update_checker(conn)
+        if found and on_update_found is not None:
+            on_update_found(found)
+    except Exception:
+        logger.exception("scheduler update check failed")
+
+
 def tick(
     conn: Connection,
     on_fired=None,
@@ -220,6 +231,8 @@ def tick(
     classify=None,
     notifier=None,
     on_events_changed=None,
+    update_checker=None,
+    on_update_found=None,
 ) -> None:
     """Run one tick: fire due reminders, repeat alerts, snooze expiry, sweeper,
     the Gmail triage job (plan §13.4), Calendar sync (plan §13), and the
@@ -268,6 +281,8 @@ def tick(
     # then read-sync at most every google.sync_minutes.
     if calendar_client is not None:
         _calendar_step(conn, calendar_client, on_events_changed)
+    if update_checker is not None:
+        _update_step(conn, update_checker, on_update_found)
     # Timezone change banner (plan C-23): when the system time zone changes,
     # show an inbox item + toast. Runs on every tick; the stored value is
     # updated so the banner shows once per change.
@@ -290,8 +305,12 @@ class SchedulerThread(QThread):
         classify=None,
         notifier=None,
         on_events_changed=None,
+        update_checker=None,
+        on_update_found=None,
     ) -> None:
         super().__init__()
+        self._update_checker = update_checker
+        self._on_update_found = on_update_found
         self._on_events_changed = on_events_changed
         self._conn = conn
         self._on_fired = on_fired
@@ -311,6 +330,8 @@ class SchedulerThread(QThread):
                 classify=self._classify,
                 notifier=self._notifier,
                 on_events_changed=self._on_events_changed,
+                update_checker=self._update_checker,
+                on_update_found=self._on_update_found,
             )
             # Sleep in small increments so stop() is responsive and shutdown is
             # deterministic (no 30 s wait stuck in msleep).

@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from secretary import __version__
 from secretary.agent.loop import run_turn
 from secretary.autostart import is_enabled as _autostart_is_enabled
 from secretary.autostart import set_enabled as _autostart_set_enabled
@@ -27,6 +28,7 @@ from secretary.config import default_timezone, load_config, save_config
 from secretary.controller.data import DataMixin
 from secretary.controller.google import GoogleMixin
 from secretary.controller.llm_settings import LLMSettingsMixin, get_active_llm_key
+from secretary.integrations import updates
 from secretary.integrations.google.gmail import GmailError, GmailPermissionError
 from secretary.store.db import Connection
 from secretary.store.repos import chat as chat_repo
@@ -69,6 +71,7 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     undo_available = Signal(list)  # [{token, label}] created by the finished turn
     open_research_brief = Signal(int)  # ask the main window to show this brief
     draft_reply_requested = Signal(str)  # text to prefill in the chat input
+    update_found = Signal(dict)  # a newer GitHub release: {tag, url}
     research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
     models_loaded = Signal(str, list)  # provider, models (for AI dropdown)
     connection_tested = Signal(str, dict)  # provider, result dict (for Test connection)
@@ -331,6 +334,36 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         cfg = load_config()
         cfg.app.theme = theme
         save_config(cfg)
+
+    def get_update_check(self) -> bool:
+        """True while the daily GitHub release check is switched on (plan 18.3)."""
+        return load_config().updates.check
+
+    def set_update_check(self, enabled: bool) -> None:
+        cfg = load_config()
+        cfg.updates.check = enabled
+        save_config(cfg)
+
+    def update_info(self) -> dict | None:
+        """The newer release to announce ({tag, url}), or None (off, current, or dismissed)."""
+        if not self.get_update_check():
+            return None
+        try:
+            return updates.available_update(self.conn, __version__)
+        except Exception:
+            return None
+
+    def dismiss_update(self, tag: str) -> None:
+        updates.dismiss(self.conn, tag)
+
+    def make_update_checker(self):
+        """The function the scheduler calls each tick; it reads the switch every time."""
+
+        def check(conn) -> dict | None:
+            cfg = load_config().updates
+            return updates.check_for_update(conn, __version__, repo=cfg.repo, enabled=cfg.check)
+
+        return check
 
     def save_general(self, timezone: str, start_minimized: bool) -> None:
         cfg = load_config()

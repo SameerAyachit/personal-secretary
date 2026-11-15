@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt, QTimer, QUrl, Slot
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -88,8 +92,27 @@ class MainWindow(QMainWindow):
         self._rail.currentItemChanged.connect(self._on_rail_changed)
         root.addWidget(self._rail)
 
-        # Content area.
+        # Content area: an "Update available" banner (plan 18.3) above the stacked views.
         self._stack = QStackedWidget()
+        self._update_tag = ""
+        self._update_url = ""
+        self._update_banner = QFrame()
+        self._update_banner.setObjectName("Card")
+        banner_row = QHBoxLayout(self._update_banner)
+        banner_row.setContentsMargins(12, 8, 12, 8)
+        self._update_text = QLabel("")
+        self._update_text.setWordWrap(True)
+        self._open_update = QPushButton("Open release page")
+        self._open_update.setObjectName("Accent")
+        self._open_update.setAccessibleName("Open the release page")
+        self._open_update.clicked.connect(self._open_update_page)
+        self._dismiss_update = QPushButton("Dismiss")
+        self._dismiss_update.setAccessibleName("Dismiss the update notice")
+        self._dismiss_update.clicked.connect(self._on_dismiss_update)
+        banner_row.addWidget(self._update_text, 1)
+        banner_row.addWidget(self._open_update)
+        banner_row.addWidget(self._dismiss_update)
+        self._update_banner.hide()
 
         # Tray icon with Open/Quit menu and an inbox overflow hint (plan C-4).
         self._tray = TrayIcon(self, controller)
@@ -109,12 +132,40 @@ class MainWindow(QMainWindow):
         }
         for view in self._views.values():
             self._stack.addWidget(view)
-        root.addWidget(self._stack)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(self._update_banner)
+        content_layout.addWidget(self._stack, 1)
+        root.addWidget(content, 1)
+
+        self._controller.update_found.connect(self._show_update)
+        self._show_update(self._controller.update_info())
 
         self._controller.tasks_changed.connect(self._views["Tasks"].refresh)
         self._controller.open_research_brief.connect(self._open_research_brief)
         self._controller.draft_reply_requested.connect(self._prefill_chat)
         self._controller.inbox_changed.connect(self.refresh_tray)
+
+    @Slot(dict)
+    def _show_update(self, info: dict | None) -> None:
+        """Show the banner for a newer release, or hide it (also when the switch is off)."""
+        info = self._controller.update_info() if info else None
+        if not info:
+            self._update_banner.hide()
+            return
+        self._update_tag, self._update_url = info["tag"], info["url"]
+        self._update_text.setText(f"Update available: Secretary {info['tag']} is out.")
+        self._update_banner.show()
+
+    def _open_update_page(self) -> None:
+        if self._update_url.startswith("https://github.com/"):
+            QDesktopServices.openUrl(QUrl(self._update_url))
+
+    def _on_dismiss_update(self) -> None:
+        self._controller.dismiss_update(self._update_tag)
+        self._update_banner.hide()
 
     def _on_system_theme_changed(self, scheme: Qt.ColorScheme) -> None:
         """Re-apply the theme when Windows changes its color scheme ("system")."""

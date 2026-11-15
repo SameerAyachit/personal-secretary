@@ -217,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             calendar_client=calendar_client,
             notifier=notifier,
             on_events_changed=controller.events_changed.emit,
+            update_checker=controller.make_update_checker(),
+            on_update_found=controller.update_found.emit,
         )
         scheduler.start()
         controller.set_scheduler(scheduler)

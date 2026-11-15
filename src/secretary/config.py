@@ -73,6 +73,7 @@ _DEFAULTS: dict[str, Any] = {
         "token_budget": 20000,
     },
     "google": {"sync_minutes": 15, "window_past_days": 7, "window_future_days": 60},
+    "updates": {"check": True, "repo": "SameerAyachit/personal-secretary"},
 }
 
 
@@ -160,6 +161,14 @@ class Google(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class Updates(BaseModel):
+    """Daily GitHub release check (plan 18.3). ``check = false`` makes no request at all."""
+
+    check: bool = True
+    repo: str = "SameerAyachit/personal-secretary"
+    model_config = ConfigDict(extra="ignore")
+
+
 class Config(BaseModel):
     app: App = App()
     llm: LLM = LLM()
@@ -169,6 +178,7 @@ class Config(BaseModel):
     search: Search = Search()
     research: Research = Research()
     google: Google = Google()
+    updates: Updates = Updates()
     model_config = ConfigDict(extra="ignore")
 
 
@@ -210,7 +220,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
     lines: list[str] = []
     for section_name in (
         "app", "llm", "notifications", "pending_actions", "backup",
-        "search", "research", "google",
+        "search", "research", "google", "updates",
     ):
         section = data[section_name]
         lines.append(f"[{section_name}]")
