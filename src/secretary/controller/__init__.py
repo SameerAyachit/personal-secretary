@@ -37,6 +37,7 @@ from secretary.store.repos import pending_actions as pa_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import research_briefs as briefs_repo
 from secretary.store.repos import tasks as tasks_repo
+from secretary.store.repos import undo as undo_repo
 from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.email import email_send_prepare
 from secretary.tools.planning import plan_day
@@ -64,6 +65,7 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
     google_connected = Signal()
     job_progress = Signal(str, int, str)
     research_status = Signal(str)  # research brief progress
+    undo_available = Signal(list)  # [{token, label}] created by the finished turn
     open_research_brief = Signal(int)  # ask the main window to show this brief
     research_brief_finished = Signal(object)  # dict: {brief, sources, ...}
     models_loaded = Signal(str, list)  # provider, models (for AI dropdown)
@@ -400,6 +402,13 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         self.inbox_changed.emit()
         self.tasks_changed.emit()
         self.turn_finished.emit(result or "I'm not sure how to help with that.")
+        try:
+            entries = self.conn.read(lambda c: undo_repo.list_for_turn(c, turn_id))
+        except Exception:
+            logger.exception("could not list undo entries for %s", turn_id)
+            entries = []
+        if entries:
+            self.undo_available.emit([{"token": e["id"], "label": e["label"]} for e in entries])
 
     @Slot(str)
     def run_research_brief(self, topic: str) -> None:
@@ -463,6 +472,22 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
         inbox_repo.update(self.conn, inbox_id, status="acknowledged")
         self.inbox_changed.emit()
         self.turn_status.emit("Inbox item acknowledged.")
+
+    @Slot(int, result=bool)
+    def undo(self, token: int) -> bool:
+        """Replay the inverse recorded for ``token`` (plan §8.4)."""
+        try:
+            done, message = self.conn.write(lambda c: undo_repo.apply(c, int(token)))
+        except Exception:
+            logger.exception("undo %s failed", token)
+            self.turn_status.emit("Undo failed.")
+            return False
+        self.turn_status.emit(message)
+        if done:
+            self.tasks_changed.emit()
+            self.events_changed.emit()
+            self.inbox_changed.emit()
+        return bool(done)
 
     @Slot(int)
     def reopen_inbox(self, inbox_id: int) -> None:

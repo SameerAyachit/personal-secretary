@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from secretary.config import default_timezone
 from secretary.store.db import Connection
 from secretary.store.repos import reminders as reminders_repo
+from secretary.store.repos import undo as undo_repo
 from secretary.timeparse.recurrence import (
     UnparseableRecurrence,
     parse_recurrence,
@@ -165,6 +166,8 @@ def reminder_create(conn: Connection, turn_id: str, args: dict) -> dict:
                 "note": "A reminder with this title and time already exists.",
             }
         raise
+    undo_repo.record(conn, turn_id, f"Set reminder '{parsed.title}'",
+                     {"op": "soft_delete", "table": "reminders", "id": reminder_id})
     return {
         "reminder_id": reminder_id,
         "title": parsed.title,
@@ -218,6 +221,8 @@ def reminder_cancel(conn: Connection, turn_id: str, args: dict) -> dict:
     ok = reminders_repo.soft_delete(conn, reminder_id, turn_id=turn_id)
     if not ok:
         return {"error": f"reminder {reminder_id} could not be cancelled"}
+    undo_repo.record(conn, turn_id, f"Cancelled reminder {reminder_id}",
+                     {"op": "restore", "table": "reminders", "id": reminder_id})
     return {"reminder_id": reminder_id, "status": "cancelled"}
 
 

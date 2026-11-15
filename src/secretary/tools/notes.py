@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from secretary.store.db import Connection
 from secretary.store.repos import notes as notes_repo
+from secretary.store.repos import undo as undo_repo
 from secretary.tools.registry import SafetyClass, ToolSpec
 
 _MAX_NOTE_CHARS = 4000
@@ -29,6 +30,9 @@ def note_add(conn: Connection, turn_id: str, args: dict) -> dict:
         if row["text"].strip().lower() == text.lower():
             return {"note_id": row["id"], "note": "Same note already saved a moment ago."}
     note_id = notes_repo.create(conn, text=text, turn_id=turn_id)
+    preview = text if len(text) <= 40 else text[:37] + "..."
+    undo_repo.record(conn, turn_id, f"Saved note '{preview}'",
+                     {"op": "soft_delete", "table": "notes", "id": note_id})
     return {"note_id": note_id, "saved": True}
 
 

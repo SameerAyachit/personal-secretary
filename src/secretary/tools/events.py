@@ -19,6 +19,7 @@ from secretary.config import default_timezone
 from secretary.integrations.google.oauth import connected as google_connected
 from secretary.store.db import Connection
 from secretary.store.repos import events as events_repo
+from secretary.store.repos import undo as undo_repo
 from secretary.timeparse.when import resolve_date, resolve_when
 from secretary.tools.registry import SafetyClass, ToolSpec
 
@@ -88,6 +89,8 @@ def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
         sync_state="pending",
         turn_id=turn_id,
     )
+    undo_repo.record(conn, turn_id, f"Created event '{parsed.title}'",
+                     {"op": "soft_delete", "table": "events", "id": event_id})
     result = {"event_id": event_id, "title": parsed.title, "start_at": start_local.isoformat(), "all_day": bool(all_day)}
     # Be honest with the model: saved locally now, Google push happens in the
     # background and only if Google is connected.

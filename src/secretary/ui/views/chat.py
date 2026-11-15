@@ -162,6 +162,7 @@ class ChatView(QWidget):
 
         self._controller.turn_status.connect(self._set_status)
         self._controller.turn_finished.connect(self._on_turn_finished)
+        self._controller.undo_available.connect(self._on_undo_available)
         self._controller.error.connect(self._on_controller_error)
 
     # ------------------------------------------------------------------ messages
@@ -202,6 +203,28 @@ class ChatView(QWidget):
             self._add_message("Secretary:", text, "error", technical=text[len(_ERROR_PREFIX):])
         elif text:
             self._add_assistant(text)
+
+    @Slot(list)
+    def _on_undo_available(self, entries: list) -> None:
+        """Show an Undo button per change the finished turn made (plan §8.4)."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        for entry in entries:
+            button = QPushButton(f"Undo: {entry['label']}")
+            button.setAccessibleName(f"Undo {entry['label']}")
+            button.clicked.connect(
+                lambda checked=False, b=button, t=entry["token"]: self._undo(b, t)
+            )
+            row_layout.addWidget(button)
+        row_layout.addStretch()
+        self._container_layout.addWidget(row)
+        self._scroll.verticalScrollBar().setValue(self._scroll.verticalScrollBar().maximum())
+
+    def _undo(self, button: QPushButton, token: int) -> None:
+        if self._controller.undo(token):
+            button.setText("Undone")
+        button.setEnabled(False)
 
     def _set_status(self, text: str) -> None:
         self._status.setText(text)

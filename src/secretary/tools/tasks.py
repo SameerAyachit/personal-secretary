@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from secretary.config import default_timezone
 from secretary.store.db import Connection
 from secretary.store.repos import tasks as tasks_repo
+from secretary.store.repos import undo as undo_repo
 from secretary.store.repos._base import now_utc
 from secretary.timeparse.when import resolve_when
 from secretary.tools.idempotency import idempotency_key
@@ -111,6 +112,8 @@ def task_create(conn: Connection, turn_id: str, args: dict) -> dict:
     )
     if parsed.priority:
         tasks_repo.update(conn, task_id, priority=parsed.priority, turn_id=turn_id)
+    undo_repo.record(conn, turn_id, f"Added task '{parsed.title}'",
+                     {"op": "soft_delete", "table": "tasks", "id": task_id})
     result = {"task_id": task_id, "title": parsed.title, "idempotency_key": key}
     if due_at:
         result["due_local"] = _local_text(due_at, parsed.tz)
@@ -225,7 +228,10 @@ def task_update(conn: Connection, turn_id: str, args: dict) -> dict:
         fields["due_tz"] = parsed.tz
     if not fields:
         return {"error": "nothing to change: give a new title, notes, time or priority"}
+    prior = {key: task.get(key) for key in fields}
     tasks_repo.update(conn, task["id"], turn_id=turn_id, **fields)
+    undo_repo.record(conn, turn_id, f"Edited task '{task['title']}'",
+                     {"op": "set", "table": "tasks", "id": task["id"], "fields": prior})
     return {"task_id": task["id"], **_brief(tasks_repo.get(conn, task["id"]) or task, parsed.tz)}
 
 
@@ -238,6 +244,9 @@ def task_complete(conn: Connection, turn_id: str, args: dict) -> dict:
     if task is None:
         return problem or {"error": "task not found"}
     tasks_repo.update(conn, task["id"], status="done", completed_at=now_utc(), turn_id=turn_id)
+    undo_repo.record(conn, turn_id, f"Completed task '{task['title']}'",
+                     {"op": "set", "table": "tasks", "id": task["id"],
+                      "fields": {"status": "open", "completed_at": None}})
     return {"task_id": task["id"], "title": task["title"], "status": "done"}
 
 
@@ -247,6 +256,8 @@ def task_delete(conn: Connection, turn_id: str, args: dict) -> dict:
     if task is None:
         return problem or {"error": "task not found"}
     tasks_repo.soft_delete(conn, task["id"], turn_id=turn_id)
+    undo_repo.record(conn, turn_id, f"Deleted task '{task['title']}'",
+                     {"op": "restore", "table": "tasks", "id": task["id"]})
     return {"task_id": task["id"], "title": task["title"], "deleted": True}
 
 
