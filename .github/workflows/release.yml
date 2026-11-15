@@ -1,0 +1,61 @@
+name: Release
+
+# Runs only when a version tag such as v0.2.0 is pushed. Nothing is published
+# unless you push the tag yourself.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+
+      - name: Run the tests first
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the app, run --diagnose on the frozen exe, build the installer
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          .\packaging\build.ps1 -Installer -Version $version
+
+      - name: Checksums
+        run: |
+          $files = Get-ChildItem packaging\Output\*.exe
+          if (-not $files) { throw "installer not found" }
+          $files | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
+          }
+          Get-ChildItem packaging\Output
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packaging/Output/*.exe
+            packaging/Output/*.sha256
+          generate_release_notes: true
+          draft: true

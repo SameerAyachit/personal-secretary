@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Build and release tooling: `packaging/build.ps1` (stops only the build-folder copy of secretary.exe, runs PyInstaller, fails unless `--diagnose` passes on the frozen exe, `-Installer` builds the Inno Setup installer); `.github/workflows/release.yml` (on a `v*` tag: tests, build, `--diagnose`, installer, SHA-256, a *draft* GitHub Release you publish yourself); CI now runs mypy on the clean core packages and a `pip-audit` job (CI-only tool, listed in `docs/deps.md`). The installer's version can be set with `/DMyAppVersion=`.
 - Tasks view (plan 12.2): Open / Today / Overdue / Done chips, a search box (title and notes), a tick box to complete or reopen, inline Edit (Save / Cancel) and Delete, and the due time in local time. It uses the same filtering code as the chat's `task_list`. Drag-to-reorder is not built (optional in the plan).
 - A reminder can belong to a task (`reminder_create` takes `task_ref`: an id or title). Pressing Done on its Inbox item asks "Mark the task as done too?" (Yes / No / Cancel); items without a task are done without a question.
 - Email replies stay in their thread (migration 012): `email_draft` with `reply_to_ref` links the draft to the original (subject defaults to "Re: ..."), the approval summary says it is a reply, and the approved send carries the Gmail `threadId` plus `In-Reply-To`/`References` (per the Gmail API threads guide).

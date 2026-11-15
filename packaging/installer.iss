@@ -4,7 +4,9 @@
 ; AUMID shortcut + toast from packaged exe verified manually (human-gated, P0-05).
 
 #define MyAppName "Secretary"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "Sameer Ayachit"
 #define MyAppExeName "secretary.exe"
 #define MyAppURL "https://example.local/secretary"
@@ -22,6 +24,8 @@ PrivilegesRequired=low
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+OutputDir=Output
+OutputBaseFilename=Secretary-Setup-{#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

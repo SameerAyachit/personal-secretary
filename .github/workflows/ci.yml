@@ -26,17 +26,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.lock
 
-      - name: Install Qt offscreen deps
-        run: |
-          # Qt_QPA_PLATFORM=offscreen needs no display on Windows CI runners
-
       - name: Run ruff
         run: ruff check .
 
+      - name: Run mypy (core packages)
+        # Scoped on purpose: these packages are clean; the rest is being cleaned up.
+        # Widen this list as more packages reach zero errors.
+        run: mypy src/secretary/timeparse src/secretary/llm src/secretary/agent src/secretary/store src/secretary/errors.py
+
       - name: Run pytest
+        # Includes the FakeLLM eval contract (tests/eval) and the offscreen UI/screenshot tests.
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q
 
       - name: Run import-linter
         run: lint-imports
+
+  audit:
+    # Dependency vulnerability scan. pip-audit is a CI-only tool: it is not
+    # part of requirements.lock and is never shipped (see docs/deps.md).
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r requirements.lock --strict
