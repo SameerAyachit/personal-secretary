@@ -12,6 +12,7 @@ from secretary.timeparse.when import (
     PastTime,
     extract_when_phrase,
     normalize_text,
+    resolve_date,
     resolve_when,
     warm_up,
 )
@@ -97,3 +98,25 @@ def test_extract_when_phrase_pulls_the_time_expression():
     assert extract_when_phrase("remind me to drink water in 10 minutes") == "in 10 minutes"
     assert extract_when_phrase("remind me to call mum tomorrow") == "tomorrow"
     assert extract_when_phrase("remind me to stretch") == "remind me to stretch"  # no phrase: unchanged
+
+
+def test_resolve_when_reads_clock_times_in_the_target_zone_even_if_now_is_utc():
+    """A UTC 'now' must not shift 'tomorrow at 9am' (regression: tools passed UTC)."""
+    now_utc = _dt.datetime(2026, 11, 15, 4, 30, tzinfo=_dt.UTC)  # 10:00 in Kolkata
+    for text, hour in (("tomorrow at 9am", 9), ("tomorrow at 5pm", 17)):
+        got = resolve_when(text, now_utc, "Asia/Kolkata")
+        assert (got.day, got.hour, got.minute) == (16, hour, 0)
+        assert got.utcoffset() == _dt.timedelta(hours=5, minutes=30)
+
+
+def test_resolve_when_same_instant_gives_same_answer_in_utc_or_local():
+    local = _dt.datetime(2026, 11, 15, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    as_utc = local.astimezone(_dt.UTC)
+    for text in ("tomorrow at 9am", "in 20 minutes", "friday at 3pm"):
+        assert resolve_when(text, local, "Asia/Kolkata") == resolve_when(text, as_utc, "Asia/Kolkata")
+
+
+def test_resolve_date_uses_the_target_zone_day():
+    # 20:00 UTC on the 14th is already 01:30 on the 15th in Kolkata.
+    now_utc = _dt.datetime(2026, 11, 14, 20, 0, tzinfo=_dt.UTC)
+    assert resolve_date("today", now_utc, "Asia/Kolkata") == _dt.date(2026, 11, 15)

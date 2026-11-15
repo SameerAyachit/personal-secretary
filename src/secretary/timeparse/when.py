@@ -61,6 +61,11 @@ SYNONYMS = _WHOLE_PHRASE_SYNONYMS  # public name (synonym → normalized phrase)
 
 
 def _parse(text: str, now: datetime, tz: str):
+    # dateparser reads clock times ("9am") and day boundaries ("today") in the
+    # zone of RELATIVE_BASE, so the base must be expressed in the target zone
+    # even when the caller holds a UTC instant.
+    if now.tzinfo is not None:
+        now = now.astimezone(ZoneInfo(tz))
     settings = {**_SETTINGS, "TIMEZONE": tz, "RELATIVE_BASE": now}
     return dateparser.parse(text, settings=settings)
 

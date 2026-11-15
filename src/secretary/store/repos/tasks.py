@@ -49,6 +49,22 @@ def list_open(
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def list_all(con: sqlite3.Connection, *, status: str | None = None, limit: int = 500) -> list[dict]:
+    """Non-deleted tasks, optionally of one status, soonest due first."""
+    if status is None:
+        cur = con.execute(
+            "SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY due_at IS NULL, due_at, id LIMIT ?",
+            (limit,),
+        )
+    else:
+        cur = con.execute(
+            "SELECT * FROM tasks WHERE deleted_at IS NULL AND status=? "
+            "ORDER BY due_at IS NULL, due_at, id LIMIT ?",
+            (status, limit),
+        )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
 def update(
     con: sqlite3.Connection,
     task_id: int,
