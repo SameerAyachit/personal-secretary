@@ -5,7 +5,7 @@ Approve/Reject, expiry countdown, and recipient highlighting
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -39,7 +39,8 @@ class ApprovalsView(QWidget):
 
         self._list = QListWidget()
         self._list.setFrameStyle(0)  # no frame
-        layout.addWidget(self._list)
+        self._list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        layout.addWidget(self._list, 3)
 
         self._drafts_title = QLabel("Drafts")
         self._drafts_title.setObjectName("Section")
@@ -53,7 +54,8 @@ class ApprovalsView(QWidget):
         layout.addWidget(self._drafts_hint)
         self._drafts = QListWidget()
         self._drafts.setFrameStyle(0)
-        layout.addWidget(self._drafts)
+        self._drafts.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        layout.addWidget(self._drafts, 2)
 
         self._controller.approvals_changed.connect(self.refresh)
         self.refresh()
@@ -72,7 +74,37 @@ class ApprovalsView(QWidget):
             item.setData(Qt.UserRole, row["id"])
             self._list.addItem(item)
             self._list.setItemWidget(item, self._row_widget(row))
+        self._fit_rows(self._list)
         self._refresh_drafts()
+
+    @staticmethod
+    def _fit_rows(list_widget: QListWidget) -> None:
+        """Give every row the height its content needs at the current width.
+
+        Item widgets are not sized by QListWidget, so without this a row with
+        wrapped text and buttons is squeezed and clipped.
+        """
+        width = max(list_widget.viewport().width(), 300)
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            widget = list_widget.itemWidget(item)
+            if widget is None:
+                continue
+            layout = widget.layout()
+            height = layout.minimumSize().height()
+            if layout.hasHeightForWidth():
+                height = max(height, layout.heightForWidth(width))
+            item.setSizeHint(QSize(width, height + 8))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_rows(self._list)
+        self._fit_rows(self._drafts)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_rows(self._list)
+        self._fit_rows(self._drafts)
 
     def _refresh_drafts(self) -> None:
         self._drafts.clear()
@@ -87,9 +119,8 @@ class ApprovalsView(QWidget):
             item = QListWidgetItem()
             item.setData(Qt.UserRole, draft["id"])
             self._drafts.addItem(item)
-            widget = self._draft_widget(draft)
-            item.setSizeHint(widget.sizeHint())
-            self._drafts.setItemWidget(item, widget)
+            self._drafts.setItemWidget(item, self._draft_widget(draft))
+        self._fit_rows(self._drafts)
 
     def _draft_widget(self, draft: dict) -> QWidget:
         widget = QWidget()
@@ -100,14 +131,14 @@ class ApprovalsView(QWidget):
         subject.setObjectName("Body")
         layout.addWidget(subject)
         to = QLabel("To: " + (", ".join(draft["recipients"]) or "(no recipient)"))
-        to.setObjectName("Caption")
+        to.setObjectName("Body")
         layout.addWidget(to)
         preview = draft["body"].strip().replace("\n", " ")
         if len(preview) > 160:
             preview = preview[:157] + "..."
         if preview:
             body = QLabel(preview)
-            body.setObjectName("Caption")
+            body.setObjectName("Body")
             body.setWordWrap(True)
             layout.addWidget(body)
         buttons = QHBoxLayout()
@@ -140,6 +171,7 @@ class ApprovalsView(QWidget):
 
         summary = QLabel(row["summary"])
         summary.setObjectName("Body")
+        summary.setWordWrap(True)
         layout.addWidget(summary)
 
         recipients = row.get("recipients") or []
@@ -149,7 +181,7 @@ class ApprovalsView(QWidget):
             new_recipients = set(row.get("new_recipients") or [])
             for recipient in recipients:
                 rec_label = QLabel(recipient + (" (new)" if recipient in new_recipients else ""))
-                rec_label.setObjectName("Caption")
+                rec_label.setObjectName("Body")
                 if recipient in new_recipients:
                     rec_label.setProperty("newRecipient", True)
                     rec_label.style().unpolish(rec_label)
@@ -161,7 +193,7 @@ class ApprovalsView(QWidget):
         body = row.get("body") or ""
         if body:
             body_label = QLabel(body)
-            body_label.setObjectName("Caption")
+            body_label.setObjectName("Body")
             body_label.setWordWrap(True)
             layout.addWidget(body_label)
 

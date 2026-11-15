@@ -108,3 +108,30 @@ def test_approvals_view_lists_drafts_with_actions(qapp):
         assert messages_repo.get(conn, draft_id) is None
     finally:
         conn.close()
+
+
+def test_approval_rows_are_tall_enough_to_show_everything(qapp):
+    """A pending approval must show summary, recipient, body and both buttons unclipped."""
+    raw = _conn()
+    db_path = raw.execute("PRAGMA database_list").fetchone()[2]
+    raw.close()
+    conn = Connection(Path(db_path))
+    try:
+        draft_id = messages_repo.create(
+            conn, from_addr="me", to_addrs='["someone@example.com"]', subject="Meeting tomorrow",
+            body="Can we move our meeting to 3pm tomorrow? " * 6,
+            received_at="2026-11-09T09:00:00+00:00", source="draft", turn_id="s")
+        email_send_prepare(conn, "t", {"draft_ref": str(draft_id)})
+        view = ApprovalsView(Controller(conn))
+        view.resize(900, 700)
+        view.show()
+        qapp.processEvents()
+        item = view._list.item(0)
+        widget = view._list.itemWidget(item)
+        assert item.sizeHint().height() >= widget.layout().minimumSize().height()
+        assert widget.height() >= widget.layout().minimumSize().height()
+        approve = next(b for b in widget.findChildren(QPushButton) if b.text() == "Approve")
+        assert approve.isVisible()
+        assert approve.mapTo(widget, approve.rect().bottomLeft()).y() < widget.height()
+    finally:
+        conn.close()
