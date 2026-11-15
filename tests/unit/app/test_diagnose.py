@@ -3,7 +3,7 @@
 Exit code semantics:
 - FAIL (exit 1): Python version, config load, keyring importable,
   store connects, tzdata.
-- WARN (exit 0 unless a FAIL is present): missing Groq/Gemini keys,
+- WARN (exit 0 unless a FAIL is present): missing NVIDIA/Gemini keys,
   missing Google refresh token, missing credentials.json.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ def test_diagnose_all_ok_exit_zero(monkeypatch, tmp_path, capsys):
     assert out.startswith("DIAGNOSE OK")
     assert "Google credentials present:" in out
     assert str(creds) in out
-    assert "Groq API key [OK]" in out
+    assert "NVIDIA API key [OK]" in out
     assert "Gemini API key [OK]" in out
     assert "Google refresh token [OK]" in out
 
@@ -39,7 +39,7 @@ def test_diagnose_missing_optional_is_warn_exit_zero(monkeypatch, tmp_path, caps
     assert out.startswith("DIAGNOSE OK")
     assert "Google credentials [WARN] missing" in out
     assert str(creds) in out
-    assert "Groq API key [WARN] missing" in out
+    assert "NVIDIA API key [WARN] missing" in out
     assert "Google refresh token [WARN] missing" in out
 
 
@@ -101,11 +101,11 @@ def test_diagnose_reports_each_key_individually(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         d,
         "get_secret",
-        lambda name: "present" if name == "llm_api_key:groq" else None,
+        lambda name: "present" if name == "llm_api_key:nvidia" else None,
     )
     code = d.run_diagnose()
     out = capsys.readouterr().out
     assert code == 0
-    assert "Groq API key [OK]" in out
+    assert "NVIDIA API key [OK]" in out
     assert "Gemini API key [WARN] missing" in out
     assert "Google refresh token [WARN] missing" in out

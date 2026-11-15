@@ -1,4 +1,4 @@
-"""OpenAI-compatible LLM client (Groq, Gemini compat, OpenRouter, Ollama).
+"""OpenAI-compatible LLM client (NVIDIA NIM, Gemini compat, OpenRouter, Ollama).
 
 Uses ``httpx`` async client. POSTs to ``{base_url}/chat/completions`` and
 normalises the response into :class:`~secretary.llm.base.LLMResponse`.
@@ -13,6 +13,7 @@ mismatch errors when turns are submitted from the Qt thread.
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -25,6 +26,16 @@ _CHAT_PATH = "/chat/completions"
 _MODELS_PATH = "/models"
 
 
+_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_THINK_OPEN = re.compile(r"<think>.*", re.DOTALL)
+
+
+def _strip_think(text: str) -> str:
+    """Drop an inline ``<think>`` reasoning trace (an unfinished one is dropped entirely)."""
+    text = _THINK_BLOCK.sub("", text)
+    return _THINK_OPEN.sub("", text).strip() if "<think>" in text else text
+
+
 class OpenAICompatClient(LLMClient):
     """An OpenAI-compatible chat-completions client for a single model."""
 
@@ -35,9 +46,10 @@ class OpenAICompatClient(LLMClient):
         api_key: str,
         model: str,
         timeout_seconds: float = 60.0,
-        reasoning_effort: str = "",
+        extra_body: dict[str, Any] | None = None,
     ) -> None:
-        self.reasoning_effort = reasoning_effort
+        # Provider-specific request fields (e.g. NVIDIA ``chat_template_kwargs``).
+        self.extra_body = extra_body
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
@@ -76,9 +88,8 @@ class OpenAICompatClient(LLMClient):
             "temperature": temperature,
             "stream": False,
         }
-        if self.reasoning_effort:
-            # gpt-oss on Groq: low | medium | high (Groq docs, "Reasoning").
-            body["reasoning_effort"] = self.reasoning_effort
+        if self.extra_body:
+            body = {**self.extra_body, **body}  # core fields always win
         if tools:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
             body["tool_choice"] = tool_choice
@@ -128,7 +139,7 @@ class OpenAICompatClient(LLMClient):
         choices = data.get("choices", []) or []
         choice = choices[0] if choices else {}
         message = choice.get("message", {}) or {}
-        text = message.get("content") or ""
+        text = _strip_think(message.get("content") or "")
         tool_calls: list[ToolCall] = []
         for tc in message.get("tool_calls", []) or []:
             fn = tc.get("function", {}) or {}

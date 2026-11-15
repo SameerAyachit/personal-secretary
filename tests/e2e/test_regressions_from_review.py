@@ -84,7 +84,7 @@ def test_each_chat_message_gets_a_unique_turn_id(qapp, conn, monkeypatch):
         return "ok"
 
     monkeypatch.setattr("secretary.controller.run_turn", fake_run_turn)
-    set_secret("llm_api_key:groq", "gsk_" + "x" * 52)
+    set_secret("llm_api_key:nvidia", "nvapi-" + "x" * 52)
     c = Controller(conn, llm=object(), limiter=object(), router=object(), registry=object(),
                    submit_coro=_sync_submit)
     c.send_message("remind me to drink water in 1 minute")
@@ -114,16 +114,16 @@ def test_tool_exception_is_reported_not_raised(conn):
 # BUG 3: Settings > AI "Save provider" and the first-run wizard call set_secret with 3 args.
 def test_set_llm_provider_saves_the_key(conn):
     c = Controller(conn)
-    key = "gsk_" + "k" * 52
-    c.set_llm_provider("groq", key, "https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
-    assert get_secret("llm_api_key:groq") == key
+    key = "nvapi-" + "k" * 52
+    c.set_llm_provider("nvidia", key, "https://integrate.api.nvidia.com/v1", "nvidia/nemotron-3.5-super-vl-120b-a12b")
+    assert get_secret("llm_api_key:nvidia") == key
 
 
 def test_blank_key_field_does_not_erase_the_saved_key(conn):
     c = Controller(conn)
-    set_secret("llm_api_key:groq", "gsk_" + "k" * 52)
-    c.set_llm_provider("groq", "", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b")
-    assert get_secret("llm_api_key:groq") == "gsk_" + "k" * 52
+    set_secret("llm_api_key:nvidia", "nvapi-" + "k" * 52)
+    c.set_llm_provider("nvidia", "", "https://integrate.api.nvidia.com/v1", "nvidia/nemotron-3.5-super-vl-120b-a12b")
+    assert get_secret("llm_api_key:nvidia") == "nvapi-" + "k" * 52
 
 
 # BUG 4: chat has no memory: ctx["history"] is never supplied, so "yes" means nothing.
@@ -135,7 +135,7 @@ def test_follow_up_message_receives_previous_exchange(qapp, conn, monkeypatch):
         return "Shall I search for papers?" if len(ctxs) == 1 else "ok"
 
     monkeypatch.setattr("secretary.controller.run_turn", fake_run_turn)
-    set_secret("llm_api_key:groq", "gsk_" + "x" * 52)
+    set_secret("llm_api_key:nvidia", "nvapi-" + "x" * 52)
     c = Controller(conn, llm=object(), limiter=object(), router=object(), registry=object(),
                    submit_coro=_sync_submit)
     c.send_message("find papers on AQI prediction")

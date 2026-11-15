@@ -22,7 +22,7 @@ _SECRET_KEYS = frozenset({
 # Patterns for secret-like string values that should be redacted even when
 # they appear as plain strings (not dict keys).
 _SECRET_PATTERNS = [
-    re.compile(r"gsk_[A-Za-z0-9]{20,}"),          # Groq API keys
+    re.compile(r"nvapi-[A-Za-z0-9_\-]{20,}"),     # NVIDIA API keys
     re.compile(r"AIza[0-9A-Za-z\\-]{35,}"),       # Google API keys
     re.compile(r"ya29\\.[0-9A-Za-z\\-]+"),        # Google OAuth tokens
     re.compile(r"[0-9A-Za-z\\-]{40,}"),           # Long generic tokens

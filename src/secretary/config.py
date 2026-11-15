@@ -22,19 +22,19 @@ _DEFAULTS: dict[str, Any] = {
         "hotkey": "Ctrl+Alt+Space",
     },
     "llm": {
-        "active": "groq",
+        "active": "nvidia",
         "history_messages": 8,
         "max_steps": 5,
         "max_output_tokens": 2048,
         "turn_timeout_seconds": 90,
         "temperature_tools": 0.1,
-        "reasoning_effort": "low",
+        "thinking": False,
         "providers": {
-            "groq": {
-                "base_url": "https://api.groq.com/openai/v1",
-                "primary_model": "",
-                "fallback_model": "openai/gpt-oss-20b",
-                "key_name": "llm_api_key:groq",
+            "nvidia": {
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "primary_model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "fallback_model": "",
+                "key_name": "llm_api_key:nvidia",
             },
             "gemini": {
                 "base_url": "",
@@ -44,8 +44,8 @@ _DEFAULTS: dict[str, Any] = {
             },
         },
         "limits": {
-            "groq_primary": {"rpm": 0, "rpd": 0, "tpm": 0, "tpd": 0, "safety_factor": 0.7},
-            "groq_fallback": {"rpm": 0, "rpd": 0, "tpm": 0, "tpd": 0, "safety_factor": 0.7},
+            # Published trial ceiling: 40 requests/min, 10,000/day (no token limit stated).
+            "nvidia_primary": {"rpm": 40, "rpd": 10000, "tpm": 0, "tpd": 0, "safety_factor": 0.7},
         },
     },
     "notifications": {
@@ -94,14 +94,14 @@ class _Provider(BaseModel):
 
 
 class LLM(BaseModel):
-    active: str = "groq"
+    active: str = "nvidia"
     history_messages: int = 8
     max_steps: int = 5
     max_output_tokens: int = 2048
     turn_timeout_seconds: int = 90
     temperature_tools: float = 0.1
-    # gpt-oss models only: "low" | "medium" | "high"; "" omits the parameter.
-    reasoning_effort: str = "low"
+    # Nemotron "thinking" mode. Off = faster replies and more reliable tool calls.
+    thinking: bool = False
     providers: dict[str, _Provider] = {}
     limits: dict[str, _Limit] = {}
     model_config = ConfigDict(extra="ignore")

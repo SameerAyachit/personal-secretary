@@ -6,7 +6,7 @@ and provider reachability without performing any writes. Returns an exit code.
 Exit code semantics:
 - FAIL (exit 1): Python version, config load, keyring importable,
   store connects, tzdata.
-- WARN (exit 0 unless a FAIL is present): missing Groq/Gemini keys,
+- WARN (exit 0 unless a FAIL is present): missing NVIDIA/Gemini keys,
   missing Google refresh token, missing credentials.json.
 
 Every check line carries a marker: [OK], [WARN] or [FAIL].
@@ -101,7 +101,7 @@ def run_diagnose() -> int:
 
     # LLM / Google API keys stored in Credential Manager (never print values)
     for label, key_name in (
-        ("Groq API key", "llm_api_key:groq"),
+        ("NVIDIA API key", "llm_api_key:nvidia"),
         ("Gemini API key", "llm_api_key:gemini"),
         ("Google refresh token", "google_token"),
     ):

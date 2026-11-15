@@ -122,7 +122,7 @@ async def test_no_tool_call_returns_text():
 async def test_tool_call_message_has_type_and_function_wrapper():
     """The assistant message that records a tool call must use the OpenAI-compatible
     shape {"id","type":"function","function":{"name","arguments"}} so providers
-    (e.g. Groq) accept it. Regression test for the missing "type" 400.
+    (e.g. NVIDIA NIM) accept it. Regression test for the missing "type" 400.
     """
     conn = _conn()
     try:

@@ -1,6 +1,6 @@
 """Secret storage via keyring (Windows Credential Manager) (plan §6, D9).
 
-Service name ``Secretary``; key names like ``llm_api_key:groq`` and
+Service name ``Secretary``; key names like ``llm_api_key:nvidia`` and
 ``google_token``. Credential Manager blobs are limited (~2.5 KB), so store the
 refresh token only and rebuild access tokens in memory (§6.3). Never log or
 return the raw value outside this module.

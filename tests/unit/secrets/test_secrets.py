@@ -23,12 +23,12 @@ def test_secrets_round_trip(monkeypatch):
     monkeypatch.setattr(s.keyring, "get_password", fake.get_password)
     monkeypatch.setattr(s.keyring, "delete_password", fake.delete_password)
 
-    s.set_secret("llm_api_key:groq", "sk-abc123")
-    assert s.get_secret("llm_api_key:groq") == "sk-abc123"
+    s.set_secret("llm_api_key:nvidia", "sk-abc123")
+    assert s.get_secret("llm_api_key:nvidia") == "sk-abc123"
     assert s.get_secret("missing") is None
 
-    s.delete_secret("llm_api_key:groq")
-    assert s.get_secret("llm_api_key:groq") is None
+    s.delete_secret("llm_api_key:nvidia")
+    assert s.get_secret("llm_api_key:nvidia") is None
 
     # Deleting a missing key must not raise.
     s.delete_secret("does-not-exist")

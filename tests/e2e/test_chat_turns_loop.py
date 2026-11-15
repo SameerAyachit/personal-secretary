@@ -147,7 +147,7 @@ def test_ten_consecutive_chat_turns(qapp, worker_thread, tmp_path):
     respx.post(CHAT_URL).mock(side_effect=_respond)
 
     conn = _conn(tmp_path)
-    set_secret("llm_api_key:groq", "test-key")
+    set_secret("llm_api_key:nvidia", "test-key")
     llm = OpenAICompatClient(base_url=BASE_URL, api_key="test-key", model="test-model")
     controller = _build_controller(conn, llm, worker_thread.submit)
 

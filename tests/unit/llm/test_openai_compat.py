@@ -9,7 +9,7 @@ from httpx import Response
 from secretary.llm.errors import AuthError, ProviderUnavailable, RequestTooLarge
 from secretary.llm.openai_compat import OpenAICompatClient
 
-BASE = "https://api.groq.com/openai/v1"
+BASE = "https://integrate.api.nvidia.com/v1"
 
 
 def _chat_response(tool_calls=None, finish_reason="stop", text="ok", model="m"):
@@ -124,7 +124,7 @@ async def test_list_models():
 @pytest.mark.asyncio
 async def test_missing_type_in_assistant_tool_call_returns_400():
     """A provider enforcing the OpenAI tool_call shape rejects messages whose
-    assistant tool_call entries lack "type" (the Groq 400 we saw in production).
+    assistant tool_call entries lack "type" (the provider 400 we saw in production).
     """
     with respx.mock:
 
@@ -187,18 +187,42 @@ async def test_auth_failure_raises_auth_error(status):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("effort,expected", [("low", "low"), ("", None)])
-async def test_reasoning_effort_is_sent_only_when_set(effort, expected):
+@pytest.mark.parametrize("extra,expected", [({"chat_template_kwargs": {"enable_thinking": False}}, {"enable_thinking": False}), (None, None)])
+async def test_extra_body_is_merged_only_when_set(extra, expected):
     with respx.mock:
         route = respx.post(f"{BASE}/chat/completions").mock(
             return_value=Response(200, json=_chat_response())
         )
         client = OpenAICompatClient(
-            base_url=BASE, api_key="k", model="openai/gpt-oss-120b", reasoning_effort=effort
+            base_url=BASE, api_key="k", model="nvidia/nemotron-3.5-super-vl-120b-a12b", extra_body=extra
         )
         try:
             await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
         finally:
             await client.aclose()
     sent = json.loads(route.calls.last.request.content)
-    assert sent.get("reasoning_effort") == expected
+    assert sent.get("chat_template_kwargs") == expected
+    assert sent["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"  # extras never override core fields
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        ("<think>let me think</think>Hello!", "Hello!"),
+        ("<think>a\nb</think>\n\nDone.", "Done."),
+        ("No tags here", "No tags here"),
+        ("<think>unfinished", ""),
+    ],
+)
+async def test_inline_think_block_is_stripped(content, expected):
+    with respx.mock:
+        respx.post(f"{BASE}/chat/completions").mock(
+            return_value=Response(200, json=_chat_response(text=content))
+        )
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            resp = await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    assert resp.text == expected

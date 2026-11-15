@@ -25,7 +25,7 @@ opt into. No web server, no browser UI, no HTTP endpoints.
   catch-up on start, tray overflow hint ("+N more") when there are many unread items.
 - **Native shell:** system tray, global hotkey (Ctrl+Alt+Space) quick capture,
   `--minimized` tray start, autostart via Windows Run key (Settings toggle or installer).
-- **AI:** plug any OpenAI-compatible provider (Groq/Gemini/Ollama) via Settings; model
+- **AI:** plug any OpenAI-compatible provider (NVIDIA NIM by default; Gemini/Ollama also work) via Settings; model
   dropdown from the provider; two-priority rate limiter keeps interactive chat ahead of
   background jobs; every turn runs on a worker event loop so the UI never blocks.
 - **Google (optional, bring your own credentials):** OAuth connect/reconnect, Calendar

@@ -8,11 +8,13 @@ from secretary.config import _DEFAULTS, Config
 from secretary.llm.factory import build_llm
 
 
-def _cfg(tpm: int, rpm: int, model: str = "openai/gpt-oss-120b") -> Config:
+def _cfg(tpm: int, rpm: int, model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b") -> Config:
     cfg = Config.model_validate(copy.deepcopy(_DEFAULTS))
-    cfg.llm.providers["groq"].primary_model = model
-    cfg.llm.limits["groq_primary"].tpm = tpm
-    cfg.llm.limits["groq_primary"].rpm = rpm
+    cfg.llm.providers["nvidia"].primary_model = model
+    cfg.llm.limits["nvidia_primary"].tpm = tpm
+    cfg.llm.limits["nvidia_primary"].rpm = rpm
+    cfg.llm.limits["nvidia_primary"].rpd = 0  # defaults ship a daily limit; these tests cover "all 0"
+    cfg.llm.limits["nvidia_primary"].tpd = 0
     return cfg
 
 
@@ -36,18 +38,24 @@ def test_no_key_or_placeholder_model_gives_none():
 
 def test_daily_limits_alone_build_a_limiter():
     cfg = _cfg(0, 0)
-    cfg.llm.limits["groq_primary"].rpd = 1000
+    cfg.llm.limits["nvidia_primary"].rpd = 1000
     _llm, limiter = build_llm(cfg, "k" * 30)
     assert limiter is not None
 
 
-def test_reasoning_effort_only_for_gpt_oss_models():
+def test_thinking_switch_is_sent_for_nemotron_models_only():
     cfg = _cfg(0, 0)
-    cfg.llm.reasoning_effort = "low"
     llm, _ = build_llm(cfg, "k" * 30)
-    assert llm.reasoning_effort == "low"
-    other, _ = build_llm(_cfg(0, 0, model="llama-3.3-70b-versatile"), "k" * 30)
-    assert other.reasoning_effort == ""
-    cfg.llm.reasoning_effort = ""
-    off, _ = build_llm(cfg, "k" * 30)
-    assert off.reasoning_effort == ""
+    assert llm.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    cfg.llm.thinking = True
+    llm, _ = build_llm(cfg, "k" * 30)
+    assert llm.extra_body == {"chat_template_kwargs": {"enable_thinking": True}}
+    other, _ = build_llm(_cfg(0, 0, model="meta/llama-3.3-70b-instruct"), "k" * 30)
+    assert other.extra_body is None
+
+
+def test_default_config_builds_the_nvidia_limiter():
+    cfg = Config.model_validate(copy.deepcopy(_DEFAULTS))
+    _llm, limiter = build_llm(cfg, "k" * 30)
+    assert limiter is not None
+    assert limiter.rpd_cap == 10000 * 0.7

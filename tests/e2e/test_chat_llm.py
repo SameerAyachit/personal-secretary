@@ -147,8 +147,8 @@ def test_chat_no_llm_key_shows_error_bubble(monkeypatch, tmp_path):
 
 def test_chat_hey_gets_reply(qapp, worker_thread, tmp_path):
     conn = _conn(tmp_path)
-    # Configure a groq key so send_message reaches the agent loop with the FakeLLM.
-    set_secret("llm_api_key:groq", "fake-key")
+    # Configure an nvidia key so send_message reaches the agent loop with the FakeLLM.
+    set_secret("llm_api_key:nvidia", "fake-key")
     llm = FakeLLM([
         LLMResponse(text="Hello there!", tool_calls=[], usage={}, headers={}, model="fake"),
     ])

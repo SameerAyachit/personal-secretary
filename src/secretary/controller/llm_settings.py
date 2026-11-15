@@ -133,7 +133,7 @@ class LLMSettingsMixin:
         """Send a tiny probe request on the worker loop; emit connection_tested.
 
         Uses the stored key when the field is blank, and the provider's
-        base_url (not a hardcoded Groq URL) so it works for Gemini too.
+        base_url (not a hardcoded provider URL) so it works for Gemini too.
         """
         cfg = load_config()
         provider = cfg.llm.active

@@ -166,7 +166,7 @@ def test_main_thread_heartbeat_stays_under_300_ms(qapp, worker_thread, tmp_path)
     monitor.start()
     try:
         conn = _conn(tmp_path)
-        set_secret("llm_api_key:groq", "fake-key")
+        set_secret("llm_api_key:nvidia", "fake-key")
         controller = _build_controller(conn, _SlowLLM(delay=5.0), worker_thread.submit)
         spy = _wait_for_turn(controller, "say ping", app)
         assert any("slow turn reply" in r for r in spy.replies), spy.replies
@@ -194,7 +194,7 @@ def test_main_thread_heartbeat_stays_under_300_ms(qapp, worker_thread, tmp_path)
     monitor.start()
     try:
         conn = _conn(tmp_path)
-        set_secret("llm_api_key:groq", "fake-key")
+        set_secret("llm_api_key:nvidia", "fake-key")
         conn.search_provider = _FakeSearchProvider()
         # research_brief_tool reads conn.llm for its internal plan/summarize/write/check calls.
         conn.llm = _ScriptedLLM(

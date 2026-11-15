@@ -90,7 +90,7 @@ def worker_thread(qapp):
 
 def _build_controller(tmp_path: Path, worker_thread: WorkerThread, monkeypatch) -> Controller:
     conn = _conn(tmp_path)
-    set_secret("llm_api_key:groq", "fake-key")
+    set_secret("llm_api_key:nvidia", "fake-key")
     conn.search_provider = _FakeSearchProvider()
     conn.llm = _ScriptedLLM(
         [

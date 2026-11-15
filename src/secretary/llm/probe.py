@@ -1,8 +1,8 @@
 """LLM probe: list available models and print per-model rate-limit headers.
 
 Run: ``python -m secretary.llm.probe`` (or ``python -m secretary --probe``).
-The API key is read from keyring (service ``secretary``, key ``llm_api_key:groq``)
-or env ``SECRETARY_PROBE_KEY``. Results belong in ``docs/groq_limits_<date>.md``.
+The API key is read from keyring (service ``secretary``, key ``llm_api_key:nvidia``)
+or env ``SECRETARY_PROBE_KEY``. Results belong in ``docs/nvidia_limits_<date>.md``.
 
 This is HUMAN-GATED: a real key is required for the live run. Without a key it
 runs in dry mode and reports that no key was found.
@@ -16,11 +16,13 @@ import sys
 
 import keyring
 
+from secretary.config import load_config
+
 from .openai_compat import OpenAICompatClient
 
 SERVICE = "secretary"
-KEY_NAME = "llm_api_key:groq"
-BASE_URL = "https://api.groq.com/openai/v1"
+KEY_NAME = "llm_api_key:nvidia"
+BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
 def _read_key() -> str | None:
@@ -71,13 +73,14 @@ async def _main() -> int:
     if not key:
         print(
             "No LLM API key found. Set env SECRETARY_PROBE_KEY or store it in "
-            "Credential Manager (service 'secretary', key 'llm_api_key:groq').",
+            "Credential Manager (service 'secretary', key 'llm_api_key:nvidia').",
             file=sys.stderr,
         )
         print("Dry mode: cannot list models or measure limits without a key.")
         return 1
 
-    models = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
+    cfg = load_config()
+    models = [cfg.llm.providers[cfg.llm.active].primary_model or "nvidia/nemotron-3.5-super-vl-120b-a12b"]
     print(f"Probing {BASE_URL} ...\n")
     for model in models:
         try:
@@ -98,7 +101,7 @@ async def _main() -> int:
         else:
             print("  rate-limit headers: none returned")
         print()
-    print("Copy this table into docs/groq_limits_<date>.md (the console is the source of truth).")
+    print("Copy this table into docs/nvidia_limits_<date>.md (the console is the source of truth).")
     return 0
 
 

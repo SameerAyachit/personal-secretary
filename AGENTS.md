@@ -20,7 +20,7 @@ Work procedure: follow `EXECUTION_PROTOCOL.md` in the root.
 1. Read the relevant plan section. State the task and acceptance criteria.
 2. Write/adjust tests first. 3. Implement. 4. Run: `ruff check`, `pytest -q`, `lint-imports`.
 5. Update `docs/adr` or `CHANGELOG.md` if a decision changed.
-6. Before using any Qt/WinRT/Google/Groq API, look it up with the docs MCP. Do not guess signatures.
+6. Before using any Qt/WinRT/Google/NVIDIA API, look it up with the docs MCP. Do not guess signatures.
 
 ## Style
 Type hints everywhere, pydantic for external data, small functions, no `print()` (use logging), no global state outside `app.py`.

@@ -43,3 +43,9 @@ def test_list_of_strings_not_redacted():
     record = _record(["sk-1234567890", "sk-9876543210"])
     ls.RedactionFilter().filter(record)
     assert record.msg == ["sk-1234567890", "sk-9876543210"], record.msg
+
+
+def test_nvidia_api_key_in_message_is_redacted():
+    # Shorter than the generic 40-char rule and containing '_': needs its own pattern.
+    out = ls._redact_obj({"message": "auth failed for nvapi-ab_CD-ef1234567890XYZ"})
+    assert out == {"message": "[REDACTED]"}

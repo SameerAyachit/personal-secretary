@@ -20,10 +20,13 @@ def build_llm(cfg: Config, key: str | None) -> tuple[OpenAICompatClient | None, 
     model = prov.primary_model or ""
     if not model or model.lower().startswith(("fake", "test")):
         return None, None
-    # ``reasoning_effort`` is a gpt-oss parameter; other models would reject it.
-    effort = cfg.llm.reasoning_effort if "gpt-oss" in model.lower() else ""
+    # Nemotron models think by default; ``enable_thinking`` is their on/off switch
+    # (NVIDIA model card). Other models could reject the unknown field.
+    extra = None
+    if "nemotron" in model.lower():
+        extra = {"chat_template_kwargs": {"enable_thinking": cfg.llm.thinking}}
     client = OpenAICompatClient(
-        base_url=prov.base_url, api_key=key, model=model, reasoning_effort=effort
+        base_url=prov.base_url, api_key=key, model=model, extra_body=extra
     )
     lim = cfg.llm.limits.get(cfg.llm.active + "_primary")
     if lim is None or not (lim.rpm > 0 or lim.tpm > 0 or lim.rpd > 0 or lim.tpd > 0):

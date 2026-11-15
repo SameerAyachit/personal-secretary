@@ -53,7 +53,7 @@ it like a password. Never print or log its contents.
 
 Store LLM API keys in Windows Credential Manager (service `Secretary`):
 
-- `llm_api_key:groq` — Groq API key (default LLM provider).
+- `llm_api_key:nvidia` — NVIDIA API key (default LLM provider).
 - `llm_api_key:gemini` — Gemini API key.
 
 You can set these via Credential Manager or the Settings → LLM screen.
@@ -76,7 +76,7 @@ DIAGNOSE OK
   [x] store connects (WAL + foreign_keys)
   [x] tzdata present
   [x] Google credentials present: C:\Users\...\AppData\Local\Secretary\credentials.json
-  [x] Groq API key present in Credential Manager
+  [x] NVIDIA API key present in Credential Manager
   [x] Gemini API key present in Credential Manager
   [x] Google refresh token present in Credential Manager
 ```

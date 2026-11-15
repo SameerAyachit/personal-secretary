@@ -109,7 +109,7 @@ def _wait_for_reply(controller, text, app, timeout=30.0):
 
 
 def test_reminder_from_chat_fires_into_inbox(monkeypatch, tmp_path, worker_thread):
-    set_secret("llm_api_key:groq", "fake-key")
+    set_secret("llm_api_key:nvidia", "fake-key")
 
     # Freeze the clock so "in 1 minute" resolves deterministically.
     monkeypatch.setattr(reminders_tools, "_utc_now", lambda: _NOW)
