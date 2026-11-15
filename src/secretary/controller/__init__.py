@@ -35,7 +35,7 @@ from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import tasks as tasks_repo
 from secretary.timeparse.when import extract_when_phrase, resolve_when
 from secretary.tools.planning import plan_day
-from secretary.tools.research import research_brief_tool
+from secretary.tools.research import run_research_job
 
 logger = logging.getLogger(__name__)
 
@@ -335,10 +335,7 @@ class Controller(DataMixin, GoogleMixin, LLMSettingsMixin, QObject):
             return
         self.turn_status.emit("Researching...")
         self.research_status.emit("Researching...")
-        turn_id = f"research-{self._turn_id}"
-        self._turn_id += 1
-        coro = research_brief_tool(self.conn, turn_id, {"topic": topic, "depth": "standard"})
-        future = self._submit_coro(coro)
+        future = self._submit_coro(run_research_job(self.conn, topic))
         future.add_done_callback(self._on_research_done)
 
     def _on_research_done(self, future: asyncio.Future) -> None:

@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import ddgs
+from ddgs.exceptions import DDGSException
 
 from secretary.store.repos import search_cache as cache_repo
 
@@ -44,15 +45,25 @@ class DDGSSearchProvider(SearchProvider):
 
     def search(self, query: str, n: int = 5) -> list[SearchResult]:
         results: list[SearchResult] = []
-        with ddgs.DDGS() as ddgs_client:
-            for r in ddgs_client.text(query, max_results=n):
-                results.append(
-                    SearchResult(
-                        title=r.get("title", ""),
-                        url=r.get("link", ""),
-                        snippet=r.get("snippet", ""),
-                    )
+        try:
+            with ddgs.DDGS() as ddgs_client:
+                rows = ddgs_client.text(query, max_results=n)
+        except DDGSException as exc:
+            if "no results" in str(exc).lower():
+                return []  # a query nothing matches is not a provider failure
+            raise
+        for r in rows:
+            # ddgs 9.x rows are {"title", "href", "body"}.
+            url = r.get("href") or r.get("link") or ""
+            if not url:
+                continue
+            results.append(
+                SearchResult(
+                    title=r.get("title", ""),
+                    url=url,
+                    snippet=r.get("body") or r.get("snippet") or "",
                 )
+            )
         return results
 
 
@@ -141,5 +152,6 @@ class SearchService:
             self._breaker.record_call(False)
             raise SearchUnavailable(str(exc)) from exc
         self._breaker.record_call(True)
-        self._cache.set(query, results)
+        if results:  # never cache "nothing found": the web may answer next time
+            self._cache.set(query, results)
         return results

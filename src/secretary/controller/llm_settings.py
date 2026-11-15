@@ -8,6 +8,7 @@ from PySide6.QtCore import Slot
 
 from secretary.config import load_config, save_config
 from secretary.llm.factory import build_llm
+from secretary.llm.metered import MeteredClient
 from secretary.llm.openai_compat import OpenAICompatClient
 from secretary.llm.probe import _probe_once
 from secretary.secrets import get_secret, set_secret
@@ -62,6 +63,8 @@ class LLMSettingsMixin:
         come from config, not code constants.
         """
         self.llm, self.limiter = build_llm(load_config(), get_active_llm_key())
+        # Research reads ``conn.llm``; it shares the chat rate-limit budget at background priority.
+        self.conn.llm = MeteredClient(self.llm, self.limiter) if self.llm is not None else None
 
     def get_llm_config(self) -> dict:
         """Return LLM provider config for the AI settings tab (no secrets)."""

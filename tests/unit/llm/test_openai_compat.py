@@ -226,3 +226,68 @@ async def test_inline_think_block_is_stripped(content, expected):
         finally:
             await client.aclose()
     assert resp.text == expected
+
+
+# ---- HTTP 429: retry with Retry-After, then a clear error -----------------------------
+
+import secretary.llm.openai_compat as compat_module  # noqa: E402
+from secretary.llm.errors import RateLimited  # noqa: E402
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    waits: list[float] = []
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(compat_module, "_sleep", fake_sleep)
+    return waits
+
+
+@pytest.mark.asyncio
+async def test_429_is_retried_honouring_retry_after(no_sleep):
+    with respx.mock:
+        route = respx.post(f"{BASE}/chat/completions").mock(
+            side_effect=[
+                Response(429, headers={"Retry-After": "3"}, json={"error": "slow down"}),
+                Response(200, json=_chat_response(text="finally")),
+            ]
+        )
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            resp = await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    assert resp.text == "finally"
+    assert route.call_count == 2
+    assert no_sleep == [3.0]
+
+
+@pytest.mark.asyncio
+async def test_persistent_429_raises_a_friendly_error_after_two_retries(no_sleep):
+    with respx.mock:
+        route = respx.post(f"{BASE}/chat/completions").mock(return_value=Response(429, json={"error": "x"}))
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            with pytest.raises(RateLimited, match="rate limit"):
+                await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    assert route.call_count == 3  # first try + 2 retries
+    assert len(no_sleep) == 2
+    assert issubclass(RateLimited, ProviderUnavailable)
+
+
+@pytest.mark.asyncio
+async def test_retry_wait_is_capped(no_sleep):
+    with respx.mock:
+        respx.post(f"{BASE}/chat/completions").mock(
+            side_effect=[Response(429, headers={"Retry-After": "600"}), Response(200, json=_chat_response())]
+        )
+        client = OpenAICompatClient(base_url=BASE, api_key="k", model="m")
+        try:
+            await client.chat(messages=[], max_tokens=10, temperature=0.0, purpose="p")
+        finally:
+            await client.aclose()
+    assert no_sleep == [20.0]

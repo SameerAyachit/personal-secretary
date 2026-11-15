@@ -13,6 +13,7 @@ mismatch errors when turns are submitted from the Qt thread.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from typing import Any
@@ -20,10 +21,14 @@ from typing import Any
 import httpx
 
 from .base import LLMClient, LLMResponse, ToolCall, parse_tool_args
-from .errors import AuthError, ProviderUnavailable, RequestTooLarge
+from .errors import AuthError, ProviderUnavailable, RateLimited, RequestTooLarge
 
 _CHAT_PATH = "/chat/completions"
 _MODELS_PATH = "/models"
+_MAX_RATE_LIMIT_RETRIES = 2
+_MAX_RETRY_WAIT_SECONDS = 20.0
+_DEFAULT_RETRY_WAIT_SECONDS = 2.0
+_sleep = asyncio.sleep  # replaced in tests
 
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -34,6 +39,15 @@ def _strip_think(text: str) -> str:
     """Drop an inline ``<think>`` reasoning trace (an unfinished one is dropped entirely)."""
     text = _THINK_BLOCK.sub("", text)
     return _THINK_OPEN.sub("", text).strip() if "<think>" in text else text
+
+
+def _retry_wait(resp: httpx.Response) -> float:
+    """Seconds to wait before retrying a 429 (``Retry-After``, capped; default 2 s)."""
+    try:
+        wait = float(resp.headers.get("Retry-After", ""))
+    except ValueError:
+        wait = _DEFAULT_RETRY_WAIT_SECONDS
+    return min(max(wait, 0.0), _MAX_RETRY_WAIT_SECONDS)
 
 
 class OpenAICompatClient(LLMClient):
@@ -95,11 +109,20 @@ class OpenAICompatClient(LLMClient):
             body["tool_choice"] = tool_choice
 
         start = time.monotonic()
-        try:
-            client = await self._ensure_client()
-            resp = await client.post(_CHAT_PATH, json=body)
-        except httpx.RequestError as exc:
-            raise ProviderUnavailable(f"provider request failed: {exc}") from exc
+        resp = None
+        for attempt in range(_MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                client = await self._ensure_client()
+                resp = await client.post(_CHAT_PATH, json=body)
+            except httpx.RequestError as exc:
+                raise ProviderUnavailable(f"provider request failed: {exc}") from exc
+            if resp.status_code != 429:
+                break
+            if attempt == _MAX_RATE_LIMIT_RETRIES:
+                raise RateLimited(
+                    "The AI provider's rate limit was reached. Wait a minute and try again."
+                )
+            await _sleep(_retry_wait(resp))
 
         if resp.status_code == 413:
             raise RequestTooLarge("request larger than the provider accepts")

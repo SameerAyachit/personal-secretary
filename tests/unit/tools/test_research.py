@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +17,14 @@ from secretary.llm.fake import FakeLLM
 from secretary.llm.tokens import count_tokens
 from secretary.store.db import Connection, migrations_folder
 from secretary.store.migrate import migrate
-from secretary.tools.research import ResearchBrief, check_claims, research_brief_tool
+from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import research_briefs as briefs_repo
+from secretary.tools.research import (
+    ResearchBrief,
+    check_claims,
+    research_brief_tool,
+    run_research_job,
+)
 
 
 def _conn():
@@ -78,7 +87,7 @@ async def test_research_brief_writes_sourced_brief(monkeypatch):
     try:
         conn.search_provider = provider
         conn.llm = llm
-        result = await research_brief_tool(conn, "turn-1", {"topic": "quantum computing"})
+        result = await run_research_job(conn, "quantum computing")
         assert result["partial"] is False
         assert result["calls"] <= 8
         assert "qubits" in result["brief"].lower()
@@ -118,7 +127,7 @@ async def test_research_brief_removes_unsupported_claims(monkeypatch):
     try:
         conn.search_provider = provider
         conn.llm = llm
-        result = await research_brief_tool(conn, "turn-1", {"topic": "topic"})
+        result = await run_research_job(conn, "topic")
         assert result["partial"] is False
         assert "Supported sentence" in result["brief"]
         assert "Removed claim" not in result["brief"]
@@ -139,7 +148,7 @@ async def test_research_brief_partial_when_search_unavailable(monkeypatch):
     try:
         conn.search_provider = UnavailableProvider()
         conn.llm = llm
-        result = await research_brief_tool(conn, "turn-1", {"topic": "topic"})
+        result = await run_research_job(conn, "topic")
         assert result["partial"] is True
         assert result["calls"] == 1
         assert result["sources"] == []
@@ -167,7 +176,7 @@ async def test_research_brief_partial_when_nothing_fetches(monkeypatch):
     try:
         conn.search_provider = provider
         conn.llm = llm
-        result = await research_brief_tool(conn, "turn-1", {"topic": "topic"})
+        result = await run_research_job(conn, "topic")
         assert result["partial"] is True
         assert result["sources"] == []
     finally:
@@ -240,3 +249,124 @@ async def test_token_budget_stops_further_sources(monkeypatch):
     pipeline = ResearchBrief(llm=None, search_provider=None, tokens_per_source=100, token_budget=250)
     sourced = await pipeline._gather(sources)
     assert len(sourced) == 2  # 100 + 100 fits, a third (300) would exceed 250
+
+
+# ---- background job (plan §14.3) ------------------------------------------------------
+
+
+def _script(*texts: str) -> FakeLLM:
+    return FakeLLM([LLMResponse(text=t, usage={}, headers={}, model="fake") for t in texts])
+
+
+_HAPPY = (
+    '{"queries": ["topic"]}',
+    '{"summary": "S.", "claims": []}',
+    '{"brief": "A sentence [1](https://example.com/a)."}',
+    '{"keep": [0]}',
+)
+
+
+def _happy_conn(monkeypatch):
+    monkeypatch.setattr(
+        "secretary.tools.research.fetch_url", lambda url: {"url": url, "text": "page text"}
+    )
+    conn = _conn()
+    conn.search_provider = FakeSearchProvider([SearchResult("A", "https://example.com/a", "...")])
+    conn.llm = _script(*_HAPPY)
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_job_records_the_brief_and_returns_its_id(monkeypatch):
+    conn = _happy_conn(monkeypatch)
+    result = await run_research_job(conn, "topic")
+    row = conn.read(lambda c: briefs_repo.get(c, result["brief_id"]))
+    assert (row["status"], row["topic"]) == ("done", "topic")
+    assert "A sentence" in row["brief"]
+    assert conn.read(lambda c: inbox_repo.list_by_status(c, None)) == []  # no inbox noise unless asked
+
+
+@pytest.mark.asyncio
+async def test_job_notifies_through_the_inbox_when_asked(monkeypatch):
+    conn = _happy_conn(monkeypatch)
+    await run_research_job(conn, "topic", notify=True)
+    [item] = conn.read(lambda c: inbox_repo.list_by_status(c, None))
+    assert item["kind"] == "system" and "topic" in item["title"]
+
+
+@pytest.mark.asyncio
+async def test_failed_job_is_recorded_and_reported_not_raised():
+    conn = _conn()
+    conn.search_provider = FakeSearchProvider([])
+
+    class _Boom:
+        async def chat(self, **kwargs):
+            raise RuntimeError("provider down")
+
+    conn.llm = _Boom()
+    result = await run_research_job(conn, "topic", notify=True)
+    assert "provider down" in result["error"]
+    row = conn.read(lambda c: briefs_repo.get(c, result["brief_id"]))
+    assert row["status"] == "failed" and "provider down" in row["error"]
+    [item] = conn.read(lambda c: inbox_repo.list_by_status(c, None))
+    assert "failed" in item["title"].lower()
+
+
+@pytest.mark.asyncio
+async def test_chat_tool_returns_immediately_and_the_job_finishes_in_background(monkeypatch):
+    conn = _happy_conn(monkeypatch)
+    started = await research_brief_tool(conn, "turn-1", {"topic": "topic"})
+    assert started["status"] == "started" and "Research tab" in started["note"]
+    [row] = conn.read(lambda c: briefs_repo.list_recent(c, 5))
+    assert row["status"] in ("running", "done")
+    await asyncio.gather(*conn.background_tasks)
+    assert conn.read(lambda c: briefs_repo.get(c, row["id"]))["status"] == "done"
+    assert len(conn.read(lambda c: inbox_repo.list_by_status(c, None))) == 1  # chat jobs notify
+
+
+@pytest.mark.asyncio
+async def test_chat_tool_without_an_llm_says_so():
+    conn = _conn()
+    conn.llm = None
+    result = await research_brief_tool(conn, "turn-1", {"topic": "topic"})
+    assert "LLM not configured" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_claim_check_counts_against_the_call_budget(monkeypatch):
+    monkeypatch.setattr(
+        "secretary.tools.research.fetch_url", lambda url: {"url": url, "text": "page text"}
+    )
+    llm = _script(*_HAPPY[:3])  # no 4th response: the claim check must not run
+    pipeline = ResearchBrief(
+        llm, FakeSearchProvider([SearchResult("A", "https://example.com/a", "...")]), max_calls=3
+    )
+    result = await pipeline.run("topic")
+    assert result["calls"] == 3
+    assert result["checked"] is False and "A sentence" in result["brief"]
+
+
+@pytest.mark.asyncio
+async def test_slow_fetch_does_not_block_the_event_loop(monkeypatch):
+    def slow_fetch(url):
+        time.sleep(0.4)
+        return {"url": url, "text": "page text"}
+
+    monkeypatch.setattr("secretary.tools.research.fetch_url", slow_fetch)
+    pipeline = ResearchBrief(None, None)
+    ticks = 0
+
+    async def heartbeat():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    async def fake_summarize(url, text):
+        return {"summary": "s", "claims": []}
+
+    pipeline._summarize = fake_summarize  # type: ignore[method-assign]
+    beat = asyncio.create_task(heartbeat())
+    await pipeline._gather([{"url": "https://e.com/a", "title": "a"}])
+    beat.cancel()
+    assert ticks >= 4

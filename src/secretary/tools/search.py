@@ -3,6 +3,8 @@ data, never as instructions (Section 8.6)."""
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel
 
 from secretary.integrations.search.provider import SearchProvider, SearchUnavailable
@@ -14,11 +16,12 @@ class WebSearchArgs(BaseModel):
     n: int = 5
 
 
-def web_search(con, turn_id: str, args: dict) -> dict:
+async def web_search(con, turn_id: str, args: dict) -> dict:
     parsed = WebSearchArgs(**args)
     provider: SearchProvider = con.search_provider  # set by the app
     try:
-        results = provider.search(parsed.query, parsed.n)
+        # The provider does blocking network I/O: keep it off the worker loop (chat shares it).
+        results = await asyncio.to_thread(provider.search, parsed.query, parsed.n)
     except SearchUnavailable as exc:
         return {"status": "unavailable", "reason": str(exc)}
     return {

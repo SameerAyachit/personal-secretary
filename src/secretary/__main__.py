@@ -23,6 +23,7 @@ from secretary.app import create_app
 from secretary.integrations.google.clients import build_clients
 from secretary.integrations.search.provider import CircuitBreaker, DDGSSearchProvider, SearchService
 from secretary.llm.factory import build_llm
+from secretary.llm.metered import MeteredClient
 from secretary.selftest import run_selftest
 from secretary.ui.quick_capture import QuickCapture
 
@@ -39,6 +40,7 @@ from .scheduler.ticker import SchedulerThread
 from .store.backup import backup_if_due
 from .store.db import Connection, migrations_folder
 from .store.migrate import migrate
+from .store.repos import research_briefs as briefs_repo
 from .store.repos import settings as settings_repo
 from .ui.main_window import MainWindow
 
@@ -140,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         controller.set_worker(app.worker)
         install_reporter(controller.error.emit)
-        conn.llm = llm  # research_brief uses it; None when no LLM key is configured
+        # Research uses conn.llm; metered so it shares the chat rate-limit budget (None = no usable model).
+        conn.llm = MeteredClient(llm, limiter) if llm is not None else None
+        conn.write(briefs_repo.fail_stale_running)  # jobs a closed app left 'running' can never finish
         window = MainWindow(controller, watchdog=app.watchdog)
 
         # Second-instance activation: raise this window.

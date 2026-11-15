@@ -22,3 +22,7 @@ class DailyLimitReached(LLMError):
 
     Never waited out (the wait could be hours); the turn fails with a clear message.
     """
+
+
+class RateLimited(ProviderUnavailable):
+    """The provider kept answering HTTP 429 after the allowed retries."""

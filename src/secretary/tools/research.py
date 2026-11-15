@@ -8,7 +8,9 @@ All LLM calls are tool-free and untrusted source text is wrapped as data.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from typing import Any
 
@@ -23,7 +25,11 @@ from secretary.integrations.search.provider import (
 )
 from secretary.llm.base import LLMClient
 from secretary.llm.tokens import count_tokens, truncate_tokens
+from secretary.store.repos import inbox as inbox_repo
+from secretary.store.repos import research_briefs as briefs_repo
 from secretary.tools.registry import SafetyClass, ToolSpec
+
+logger = logging.getLogger(__name__)
 
 MAX_SOURCES = 4
 MAX_CALLS = 8
@@ -229,8 +235,12 @@ class ResearchBrief:
         )
         return str(data.get("brief", "")) if isinstance(data, dict) else ""
 
-    async def _check_citations(self, brief: str, sourced: list[dict]) -> str:
-        return await check_claims(brief, sourced, self._llm)
+    async def _check_citations(self, brief: str, sourced: list[dict]) -> tuple[str, bool]:
+        """Run the source-bound claim check if the call budget allows; returns (brief, checked)."""
+        if self.calls >= self._max_calls:
+            return brief, False
+        self.calls += 1
+        return await check_claims(brief, sourced, self._llm), True
 
     async def _gather(self, sources: list[dict]) -> list[dict]:
         """Fetch and summarise each source within the per-source and total token limits."""
@@ -238,7 +248,7 @@ class ResearchBrief:
         spent = 0
         for source in sources:
             try:
-                fetched = fetch_url(source["url"])
+                fetched = await asyncio.to_thread(fetch_url, source["url"])
             except FetchError:
                 continue
             text = truncate_tokens(fetched.get("text", ""), self._tokens_per_source)
@@ -252,7 +262,7 @@ class ResearchBrief:
 
     async def run(self, topic: str, depth: str = "standard") -> dict:
         queries = await self._plan_queries(topic)
-        sources = self._search(queries)
+        sources = await asyncio.to_thread(self._search, queries)
         if not sources:
             return {
                 "topic": topic,
@@ -273,34 +283,97 @@ class ResearchBrief:
                 "partial": True,
             }
         brief = await self._write_brief(topic, sourced)
-        brief = await self._check_citations(brief, sourced)
+        brief, checked = await self._check_citations(brief, sourced)
         return {
             "topic": topic,
             "depth": depth,
             "brief": brief,
             "sources": [{"url": s["url"], "title": s["title"]} for s in sourced],
             "calls": self.calls,
-            "partial": False,
+            "partial": not checked,
+            "checked": checked,
         }
 
 
-async def research_brief_tool(conn: Any, turn_id: str, args: dict) -> dict:
-    """Research brief tool entry point (class A)."""
-    parsed = ResearchBriefArgs(**args)
-    provider = getattr(conn, "search_provider", None) or DDGSSearchProvider()
+async def run_research_job(
+    conn: Any,
+    topic: str,
+    depth: str = "standard",
+    notify: bool = False,
+    brief_id: int | None = None,
+) -> dict:
+    """Run one research brief, recording it in ``research_briefs``.
+
+    Never raises: a failure is stored on the row and returned as ``{"error": ...}``.
+    ``notify`` adds an inbox item when the job ends (used for chat-started jobs).
+    Pass ``brief_id`` when the caller already created the row.
+    """
     llm = getattr(conn, "llm", None)
-    if llm is None:
-        return {"error": "LLM not configured; research brief requires an LLM provider."}
-    research_cfg = load_config().research
-    pipeline = ResearchBrief(
-        llm,
-        provider,
-        max_calls=research_cfg.max_llm_calls,
-        max_sources=research_cfg.max_sources,
-        tokens_per_source=research_cfg.tokens_per_source,
-        token_budget=research_cfg.token_budget,
+    provider = getattr(conn, "search_provider", None) or DDGSSearchProvider()
+    if brief_id is None:
+        brief_id = conn.write(lambda c: briefs_repo.create(c, topic))
+    try:
+        if llm is None:
+            raise ResearchBriefError("LLM not configured; research brief requires an LLM provider.")
+        cfg = load_config().research
+        pipeline = ResearchBrief(
+            llm,
+            provider,
+            max_calls=cfg.max_llm_calls,
+            max_sources=cfg.max_sources,
+            tokens_per_source=cfg.tokens_per_source,
+            token_budget=cfg.token_budget,
+        )
+        result = await pipeline.run(topic, depth)
+    except Exception as exc:  # recorded and reported, never raised into the worker loop
+        logger.exception("research job %s failed", brief_id)
+        message = str(exc) or type(exc).__name__
+        conn.write(lambda c: briefs_repo.fail(c, brief_id, message))
+        if notify:
+            _notify(conn, f"Research failed: {topic}", message, brief_id)
+        return {"brief": "", "sources": [], "error": f"Research failed: {message}", "brief_id": brief_id}
+    conn.write(
+        lambda c: briefs_repo.finish(c, brief_id, result["brief"], result["sources"], result["partial"])
     )
-    return await pipeline.run(parsed.topic, parsed.depth)
+    if notify:
+        _notify(conn, f"Research brief ready: {topic}", "Open the Research tab to read it.", brief_id)
+    return {**result, "brief_id": brief_id}
+
+
+def _notify(conn: Any, title: str, body: str, brief_id: int) -> None:
+    conn.write(
+        lambda c: inbox_repo.create(
+            c,
+            kind="system",
+            title=title,
+            body=body,
+            payload_json=json.dumps({"research_brief_id": brief_id}),
+            turn_id="research",
+        )
+    )
+
+
+async def research_brief_tool(conn: Any, turn_id: str, args: dict) -> dict:
+    """Chat tool (class A): start a research brief in the background and return at once.
+
+    A brief takes longer than a chat turn may, so it runs as its own job on the
+    worker loop; the result lands in the Research tab and the inbox.
+    """
+    parsed = ResearchBriefArgs(**args)
+    if getattr(conn, "llm", None) is None:
+        return {"error": "LLM not configured; research brief requires an LLM provider."}
+    brief_id = conn.write(lambda c: briefs_repo.create(c, parsed.topic))
+    tasks: set = conn.__dict__.setdefault("background_tasks", set())
+    task = asyncio.create_task(
+        run_research_job(conn, parsed.topic, parsed.depth, notify=True, brief_id=brief_id)
+    )
+    tasks.add(task)  # keep a reference so the task is not garbage collected mid-run
+    task.add_done_callback(tasks.discard)
+    return {
+        "status": "started",
+        "topic": parsed.topic,
+        "note": "Research started in the background. The brief will appear in the Research tab and the inbox.",
+    }
 
 
 class CheckClaimsArgs(BaseModel):
@@ -327,7 +400,7 @@ def register(registry) -> None:
             name="research_brief",
             group="research",
             safety_class=SafetyClass.A,
-            description="Research a topic and write a sourced brief.",
+            description="Start a background research brief on a topic; the result appears in the Research tab.",
             args_model=ResearchBriefArgs,
             fn=research_brief_tool,
         )

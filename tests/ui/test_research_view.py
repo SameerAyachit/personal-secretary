@@ -174,10 +174,10 @@ def test_research_failure_shows_error(qapp, worker_thread, tmp_path, monkeypatch
     app = QApplication.instance()
     controller = _build_controller(tmp_path, worker_thread, monkeypatch)
 
-    async def boom(conn, turn_id, args):
+    async def boom(conn, topic, *args, **kwargs):
         raise RuntimeError("research pipeline down")
 
-    monkeypatch.setattr(controller_module, "research_brief_tool", boom)
+    monkeypatch.setattr(controller_module, "run_research_job", boom)
     view = ResearchView(controller)
     view._topic.setText("anything")
     spy = ResearchSpy()

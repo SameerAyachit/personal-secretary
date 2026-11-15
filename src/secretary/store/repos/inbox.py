@@ -43,6 +43,20 @@ def list_unacknowledged(con: sqlite3.Connection, *, limit: int = 200) -> list[di
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def list_by_status(
+    con: sqlite3.Connection, status: str | None = None, *, limit: int = 200
+) -> list[dict]:
+    """Inbox items newest first; ``status=None`` returns every status."""
+    if status is None:
+        cur = con.execute("SELECT * FROM inbox ORDER BY created_at DESC, id DESC LIMIT ?", (limit,))
+    else:
+        cur = con.execute(
+            "SELECT * FROM inbox WHERE status=? ORDER BY created_at DESC, id DESC LIMIT ?",
+            (status, limit),
+        )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
 def update(
     con: sqlite3.Connection,
     inbox_id: int,
