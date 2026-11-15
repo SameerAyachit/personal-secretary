@@ -74,6 +74,27 @@ _CLAIM_NUDGE = (
     "so nothing was done. Call the right tool now, or tell the user plainly that you have not "
     "done it yet."
 )
+_READ_NOUNS = r"(?:tasks?|reminders?|events?|meetings?|appointments?|schedule)"
+_LISTING_PATTERNS = (
+    # "You have 3 open tasks", "You have a meeting at 3pm" (but not "You have no ...")
+    re.compile(
+        r"\byou (?:have|got)\s+(?:\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+        rf"[^.\n]*\b{_READ_NOUNS}\b",
+        re.IGNORECASE,
+    ),
+    # "Here are your events:", "Your tasks for today:", "Your reminders: ..."
+    re.compile(rf"\b(?:here (?:are|is)|your)\b[^.\n:]*\b{_READ_NOUNS}\b[^.\n]*:", re.IGNORECASE),
+)
+_LIST_ITEM = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s+(.+)$", re.MULTILINE)
+_READ_NUDGE = (
+    "You described the user's tasks, events or reminders without calling a list tool this turn, "
+    "so that information may be invented. Call task_list, event_list or reminder_list now, or "
+    "tell the user plainly that you have not checked."
+)
+_READ_FALLBACK = (
+    "I haven't checked your tasks, events or reminders just now, so I won't guess. "
+    "Ask me again and I'll look them up."
+)
 _EMAIL_CLAIM_FALLBACK = (
     "I haven't saved or sent anything yet. Tell me who it is for and what it should say "
     "(a subject is optional) and I'll save it as a draft under Approvals > Drafts."
@@ -97,6 +118,19 @@ def _failure_text(result: dict) -> str:
     """The plain-language reason a tool call failed, for the user."""
     message = result.get("user_message") or str(result.get("error") or "").strip()
     return message or "Something went wrong."
+
+
+def _claims_listing(text: str, history_text: str) -> bool:
+    """True when a reply lists the user's tasks/events/reminders (to be checked against a tool call).
+
+    A list that already appears in the conversation is the model quoting itself, not inventing.
+    """
+    if not text or "?" in text:
+        return False
+    if not any(p.search(text) for p in _LISTING_PATTERNS):
+        return False
+    items = [m.group(1).strip().lower() for m in _LIST_ITEM.finditer(text)]
+    return not (items and all(item in history_text for item in items))
 
 
 def _estimate_tokens(messages: list[dict], tools: list[dict]) -> int:
@@ -208,6 +242,7 @@ async def run_turn(
     max_steps = cfg.llm.max_steps or MAX_STEPS
     timeout_s = cfg.llm.turn_timeout_seconds or TURN_TIMEOUT_SECONDS
     messages = _build_context(user_text, ctx)
+    history_text = "\n".join(str(m.get("content") or "") for m in ctx.get("history", []) or []).lower()
     selected = router.select(user_text, ctx or {})
     logger.info("chat turn %s: started selected_tools=%s", turn_id,
                 [t.name for t in selected])
@@ -259,14 +294,19 @@ async def run_turn(
             if resp.finish_reason == "length":
                 return ("I ran out of output room before finishing my answer. "
                         "Try asking a shorter question, or I can continue in parts.")
-            if not tool_ran and _claims_action(resp.text):
-                # The model claimed an action without doing it. Give it one
-                # chance to really call the tool, then answer honestly.
+            claimed_action = not tool_ran and _claims_action(resp.text)
+            claimed_read = (not tool_ran and not claimed_action
+                            and _claims_listing(resp.text, history_text))
+            if claimed_action or claimed_read:
+                # The model claimed an action (or described the user's data) without a
+                # tool. Give it one chance to really call the tool, then answer honestly.
                 if not nudged:
                     nudged = True
                     messages.append({"role": "assistant", "content": resp.text})
-                    messages.append({"role": "user", "content": _CLAIM_NUDGE})
+                    messages.append({"role": "user", "content": _CLAIM_NUDGE if claimed_action else _READ_NUDGE})
                     continue
+                if claimed_read:
+                    return _READ_FALLBACK
                 return _EMAIL_CLAIM_FALLBACK if _EMAIL_WORDS.search(resp.text) else _CLAIM_FALLBACK
             return resp.text or "I'm not sure how to help with that."
 
