@@ -94,3 +94,28 @@ def test_transient_failure_stays_pending_and_permanent_fails(respx_mock, monkeyp
     push_pending_events(conn, client)
     row = conn.execute("SELECT sync_state, sync_error FROM events WHERE id=?", (eid,)).fetchone()
     assert row[0] == "failed" and "400" in row[1]
+
+
+def test_event_already_on_google_is_patched_not_reinserted(respx_mock, monkeypatch):
+    client = _client(respx_mock, monkeypatch)
+    patch_route = respx_mock.patch(f"{EVENTS_URL}/{'a' * 32}").mock(
+        return_value=httpx.Response(200, json={"id": "a" * 32, "etag": '"e2"'})
+    )
+    post_route = respx_mock.post(EVENTS_URL).mock(return_value=httpx.Response(200, json={}))
+    conn = _conn()
+    eid = _pending(conn, title="Dentist (moved)", etag='"e1"')  # etag set: Google already has it
+    assert push_pending_events(conn, client) == 1
+    assert not post_route.called
+    body = json.loads(patch_route.calls[0].request.content)
+    assert body["summary"] == "Dentist (moved)"
+    row = conn.execute("SELECT sync_state, etag FROM events WHERE id=?", (eid,)).fetchone()
+    assert (row[0], row[1]) == ("synced", '"e2"')
+
+
+def test_patch_404_marks_the_event_failed(respx_mock, monkeypatch):
+    client = _client(respx_mock, monkeypatch)
+    respx_mock.patch(f"{EVENTS_URL}/{'a' * 32}").mock(return_value=httpx.Response(404, json={}))
+    conn = _conn()
+    eid = _pending(conn, etag='"e1"')
+    assert push_pending_events(conn, client) == 0
+    assert conn.execute("SELECT sync_state FROM events WHERE id=?", (eid,)).fetchone()[0] == "failed"

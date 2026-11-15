@@ -23,6 +23,11 @@ from secretary.timeparse.when import resolve_date, resolve_when
 from secretary.tools.registry import SafetyClass, ToolSpec
 
 
+def _utc_now() -> datetime:
+    """Current UTC time. Overridable in tests to freeze the clock."""
+    return datetime.now(UTC)
+
+
 def _duration_minutes(duration_text: str) -> int:
     text = (duration_text or "1 hour").strip().lower()
     match = re.match(
@@ -56,7 +61,7 @@ def _day_bounds(day_text: str, now: datetime, tz: str) -> tuple[datetime, dateti
 
 def event_create(conn: Connection, turn_id: str, args: dict) -> dict:
     parsed = EventCreateArgs(**args)
-    now = datetime.now(UTC)
+    now = _utc_now()
     if parsed.all_day:
         start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
         all_day = 1
@@ -143,6 +148,86 @@ def event_list(conn: Connection, turn_id: str, args: dict) -> dict:
     return {"events": events, "filter": parsed.filter}
 
 
+class EventUpdateArgs(BaseModel):
+    event_ref: str = Field(..., description="Event id or part of its title")
+    title: str | None = Field(None, description="New title")
+    when_text: str | None = Field(None, description="New start time (or date for all-day events)")
+    duration_text: str | None = Field(None, description="New duration, e.g. '30 minutes'")
+    location: str | None = Field(None, description="New location")
+    tz: str = Field(default_factory=default_timezone, description="Time zone for the event")
+
+
+def _resolve_event(conn: Connection, ref: str) -> tuple[dict | None, dict | None]:
+    """Return (event, None) or (None, error-or-candidates); fragments never guess."""
+    ref = (ref or "").strip()
+    if ref.isdigit():
+        row = events_repo.get(conn, int(ref))
+        return (row, None) if row else (None, {"error": f"no event with id {ref}"})
+    since = (_utc_now() - timedelta(days=1)).isoformat()
+    pool = events_repo.list_from(conn, since=since)
+    needle = ref.lower()
+    exact = [r for r in pool if r["title"].strip().lower() == needle]
+    matches = exact or [r for r in pool if needle and needle in r["title"].lower()]
+    if not matches:
+        return None, {"error": f"no upcoming event matches '{ref}'"}
+    if len(matches) > 1:
+        return None, {
+            "candidates": [{"id": r["id"], "title": r["title"], "start_at": r["start_at"]} for r in matches[:5]],
+            "note": "More than one event matches. Ask the user which one; nothing was changed.",
+        }
+    return matches[0], None
+
+
+def event_update(conn: Connection, turn_id: str, args: dict) -> dict:
+    """Change one of the user's own events (class B). Attendees are not supported."""
+    parsed = EventUpdateArgs(**args)
+    event, problem = _resolve_event(conn, parsed.event_ref)
+    if event is None:
+        return problem or {"error": "event not found"}
+    fields: dict = {}
+    if parsed.title is not None:
+        fields["title"] = parsed.title
+    if parsed.location is not None:
+        fields["location"] = parsed.location
+    old_start = datetime.fromisoformat(event["start_at"])
+    old_end = datetime.fromisoformat(event["end_at"]) if event.get("end_at") else old_start + timedelta(hours=1)
+    if parsed.when_text or parsed.duration_text:
+        now = _utc_now()
+        try:
+            if event["all_day"]:
+                if not parsed.when_text:
+                    return {"error": "all-day events have no duration; give a new date"}
+                start_local, end_local = _day_bounds(parsed.when_text, now, parsed.tz)
+            else:
+                start_local = (
+                    resolve_when(parsed.when_text, now, parsed.tz) if parsed.when_text
+                    else old_start.astimezone(ZoneInfo(parsed.tz))
+                )
+                length = (
+                    timedelta(minutes=_duration_minutes(parsed.duration_text))
+                    if parsed.duration_text else old_end - old_start
+                )
+                end_local = start_local + length
+        except Exception as exc:
+            return {"error": f"could not resolve time '{parsed.when_text}': {exc}. Ask the user for a clearer time."}
+        fields["start_at"] = start_local.astimezone(UTC).isoformat()
+        fields["end_at"] = end_local.astimezone(UTC).isoformat()
+        fields["tz"] = parsed.tz
+    if not fields:
+        return {"error": "nothing to change: give a new title, time, duration or location"}
+    events_repo.update(conn, event["id"], turn_id=turn_id, **fields)
+    # Queue the change for Google (patched when the event already exists there).
+    events_repo.set_sync_state(conn, event["id"], "pending")
+    updated = events_repo.get(conn, event["id"]) or event
+    return {
+        "event_id": event["id"],
+        "title": updated["title"],
+        "start_at": datetime.fromisoformat(updated["start_at"]).astimezone(ZoneInfo(updated["tz"])).isoformat(),
+        "all_day": bool(updated["all_day"]),
+        "google": "queued" if google_connected() else "not_connected",
+    }
+
+
 def register(registry) -> None:
     registry.register(
         ToolSpec(
@@ -152,6 +237,16 @@ def register(registry) -> None:
             description="Create a calendar event",
             args_model=EventCreateArgs,
             fn=event_create,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="event_update",
+            group="calendar",
+            safety_class=SafetyClass.B,
+            description="Change one of your own events: title, time, duration or location",
+            args_model=EventUpdateArgs,
+            fn=event_update,
         )
     )
     registry.register(

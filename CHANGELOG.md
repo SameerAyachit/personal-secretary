@@ -4,6 +4,7 @@
 
 ### Added
 - Chat can now finish the task lifecycle (plan §8.5): `task_update`, `task_complete`, `task_delete` (soft delete), and `task_list` honours its `open|today|tomorrow|week|overdue|done|search` filters. A task reference is an id or title fragment; if a fragment matches several tasks the tool returns the candidates and changes nothing. Bulk delete is not offered (ambiguity is asked, never guessed).
+- `event_update` (class B, own events): change title, time, duration or location in chat. Edits to an event Google already has are sent with `events.patch` (verified against the Calendar API reference); new events still use `events.insert`. Ambiguous titles return candidates instead of guessing. Attendee changes remain unsupported.
 - Config keys now take effect: `search.*` (breaker, cache TTL), `research.max_sources/max_llm_calls`, `notifications.toast/popup_card`, `pending_actions.*` TTLs, `google.window_*_days`, `backup.keep`, `llm.temperature_tools`.
 - Calendar write-back: events created in chat are pushed to Google Calendar (migration 007, `sync_state`, idempotent retries); see ADR-003.
 - `llm.max_output_tokens` config (default 2048); the agent loop honours `llm.max_steps` and `llm.turn_timeout_seconds`.

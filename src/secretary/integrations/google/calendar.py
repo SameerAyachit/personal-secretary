@@ -120,6 +120,20 @@ class CalendarClient:
             raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
         return response.json()
 
+    def patch_event(self, calendar_id: str, event_id: str, body: dict) -> dict:
+        """PATCH ``events.patch``: partial update of an existing event."""
+        url = f"{CALENDAR_API.format(calendar_id=calendar_id)}/{event_id}"
+        try:
+            response = self._client.patch(
+                url, json=body, headers=self._auth.auth_header(), timeout=30.0
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise self._api_error(exc) from exc
+        except httpx.HTTPError as exc:
+            raise GoogleCalendarError(f"Calendar API call failed: {exc}") from exc
+        return response.json()
+
     def list_events(
         self,
         calendar_id: str,
@@ -311,7 +325,13 @@ def push_pending_events(conn: Connection, client: CalendarClient, calendar_id: s
     pushed = 0
     for row in events_repo.list_pending(conn):
         try:
-            created = client.insert_event(calendar_id, _event_body(row))
+            if row.get("etag") and row.get("google_event_id"):
+                # Google already has this event (it carries an etag): send the edit.
+                body = _event_body(row)
+                body.pop("id", None)
+                created = client.patch_event(calendar_id, row["google_event_id"], body)
+            else:
+                created = client.insert_event(calendar_id, _event_body(row))
         except GoogleCalendarError as exc:
             if exc.status_code == 409:
                 events_repo.set_sync_state(conn, row["id"], "synced")

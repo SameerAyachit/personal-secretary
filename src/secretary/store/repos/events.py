@@ -42,6 +42,21 @@ def list_window(con: sqlite3.Connection, *, start_at: str, end_at: str) -> list[
     return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+def get(con: sqlite3.Connection, event_id: int) -> dict | None:
+    cur = con.execute("SELECT * FROM events WHERE id=? AND deleted_at IS NULL", (event_id,))
+    row = cur.fetchone()
+    return row_to_dict(cur, row) if row else None
+
+
+def list_from(con: sqlite3.Connection, *, since: str, limit: int = 200) -> list[dict]:
+    """Non-deleted events starting at or after ``since`` (ISO), soonest first."""
+    cur = con.execute(
+        "SELECT * FROM events WHERE deleted_at IS NULL AND start_at >= ? ORDER BY start_at LIMIT ?",
+        (since, limit),
+    )
+    return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
 def update(
     con: sqlite3.Connection,
     event_id: int,
@@ -62,6 +77,8 @@ def update(
     params.append(now_utc())
     params.append(event_id)
     cur = con.execute(f"UPDATE events SET {', '.join(sets)} WHERE id=? AND deleted_at IS NULL", params)
+    if cur.rowcount > 0:
+        action_log(con, turn_id, "updated", "event", event_id, {"fields": list(fields)})
     return cur.rowcount > 0
 
 

@@ -40,6 +40,7 @@ def build_registry_and_router() -> tuple[tools_registry.Registry, Router]:
     router.route("email_send", ["send", "email"])
     router.route("web_search", ["search", "web"])
     router.route("event_create", ["event", "calendar", "meeting", "appointment"])
+    router.route("event_update", ["event", "calendar", "meeting", "appointment", "reschedule", "move", "change"])
     router.route("event_list", ["events", "calendar", "schedule", "agenda"])
     router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
     router.route("research_brief", ["research", "brief", "summarize"])
