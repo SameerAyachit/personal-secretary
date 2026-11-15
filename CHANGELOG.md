@@ -4,6 +4,7 @@
 
 ### Added
 - Chat can now finish the task lifecycle (plan §8.5): `task_update`, `task_complete`, `task_delete` (soft delete), and `task_list` honours its `open|today|tomorrow|week|overdue|done|search` filters. A task reference is an id or title fragment; if a fragment matches several tasks the tool returns the candidates and changes nothing. Bulk delete is not offered (ambiguity is asked, never guessed).
+- `note_add` / `note_search` (plan §8.5; migration 009 `notes`): dictate free-form notes in chat and find them later; notes are included in the Settings > Data export.
 - `event_update` (class B, own events): change title, time, duration or location in chat. Edits to an event Google already has are sent with `events.patch` (verified against the Calendar API reference); new events still use `events.insert`. Ambiguous titles return candidates instead of guessing. Attendee changes remain unsupported.
 - Config keys now take effect: `search.*` (breaker, cache TTL), `research.max_sources/max_llm_calls`, `notifications.toast/popup_card`, `pending_actions.*` TTLs, `google.window_*_days`, `backup.keep`, `llm.temperature_tools`.
 - Calendar write-back: events created in chat are pushed to Google Calendar (migration 007, `sync_state`, idempotent retries); see ADR-003.
@@ -35,6 +36,7 @@
 - Runtime `CREATE TABLE` for the search cache (migration 003 owns the table).
 
 ### Fixed
+- Settings > Data export always left the events section empty (empty time window); it now exports all events.
 - Absolute times set through chat ("tomorrow at 9am") were read as UTC clock times: `resolve_when` did not convert `now` into the target zone, and the reminder, event and task tools pass a UTC `now`, so such reminders/events landed hours late (5.5 h in IST). Relative times ("in 10 minutes") and the Tasks/Quick-add paths were not affected. `resolve_when`/`resolve_date` now always read the clock in the target zone.
 - `task_create` ignored `when_text` (tasks made in chat never got a due date). It now resolves it in code, asks for a clearer time instead of silently dropping an unparseable one, and de-duplicates the same title within a minute.
 - Research: web search found no sources because `ddgs` returns `href`/`body` (the provider read `link`/`snippet`); a "No results found" answer no longer counts against the circuit breaker; searches and page fetches no longer block the shared worker loop; research LLM calls now go through the rate limiter (`MeteredClient`) and a provider HTTP 429 is retried (honouring `Retry-After`) instead of failing; saving the provider in Settings now also reaches research.

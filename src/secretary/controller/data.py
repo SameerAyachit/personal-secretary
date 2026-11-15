@@ -18,6 +18,7 @@ from secretary.secrets import delete_secret
 from secretary.store.backup import backup, list_backups, prune_backups, restore
 from secretary.store.repos import events as events_repo
 from secretary.store.repos import facts as facts_repo
+from secretary.store.repos import notes as notes_repo
 from secretary.store.repos import reminders as reminders_repo
 from secretary.store.repos import tasks as tasks_repo
 
@@ -110,20 +111,21 @@ class DataMixin:
                 self._worker.stop()
 
     def export_data(self, fmt: str = "json") -> dict:
-        """Export tasks, reminders, events and facts as JSON or Markdown
+        """Export tasks, reminders, events, facts and notes as JSON or Markdown
         (Settings Data 'Export', plan §942)."""
         payload = {
             "tasks": tasks_repo.list_open(self.conn),
             "reminders": reminders_repo.list_all(self.conn),
-            "events": events_repo.list_window(self.conn, start_at="", end_at=""),
+            "events": events_repo.list_window(self.conn, start_at="", end_at="9999-12-31"),
             "facts": facts_repo.list_all(self.conn),
+            "notes": notes_repo.list_recent(self.conn, limit=10000),
             "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         backups_dir().mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         if fmt == "markdown":
             lines = ["# Secretary export", f"Generated: {payload['exported_at']}", ""]
-            for section in ("tasks", "reminders", "events", "facts"):
+            for section in ("tasks", "reminders", "events", "facts", "notes"):
                 lines.append(f"## {section.title()}")
                 for row in payload[section]:
                     lines.append("- " + " | ".join(f"{k}={v}" for k, v in row.items() if v is not None))

@@ -6,6 +6,7 @@ from secretary.agent.router import Router
 from secretary.tools import email as email_tools
 from secretary.tools import events as events_tools
 from secretary.tools import memory as memory_tools
+from secretary.tools import notes as notes_tools
 from secretary.tools import planning as planning_tools
 from secretary.tools import registry as tools_registry
 from secretary.tools import reminders as reminders_tools
@@ -28,6 +29,7 @@ def build_registry_and_router() -> tuple[tools_registry.Registry, Router]:
         planning_tools,
         reminders_tools,
         memory_tools,
+        notes_tools,
         research_tools,
         search_tools,
     ):
