@@ -124,6 +124,7 @@ class OpenAICompatClient(LLMClient):
                 )
             await _sleep(_retry_wait(resp))
 
+        assert resp is not None  # the loop above always runs at least once
         if resp.status_code == 413:
             raise RequestTooLarge("request larger than the provider accepts")
         if resp.status_code in (401, 403):

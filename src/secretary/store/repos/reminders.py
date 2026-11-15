@@ -31,7 +31,7 @@ def create(
         (task_id, title, body, kind, tz, rule_json, next_fire_at, "scheduled", priority,
          idempotency_key, now, now),
     )
-    rid = int(cur.lastrowid)
+    rid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "reminder", rid, {"title": title, "kind": kind})
     return rid
 
@@ -102,7 +102,8 @@ def rule(con: sqlite3.Connection, reminder_id: int) -> dict | None:
     row = cur.fetchone()
     if not row or row[0] is None:
         return None
-    return json.loads(row[0])
+    rule_data: dict | None = json.loads(row[0])
+    return rule_data
 
 
 def get_by_idempotency_key(con: sqlite3.Connection, key: str) -> dict | None:

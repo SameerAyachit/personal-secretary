@@ -25,7 +25,7 @@ def record(con: sqlite3.Connection, turn_id: str | None, label: str, inverse: di
         "INSERT INTO undo_entries(turn_id, label, inverse_json, created_at) VALUES(?,?,?,?)",
         (turn_id, label, json.dumps(inverse), now_utc()),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def get(con: sqlite3.Connection, entry_id: int) -> dict | None:

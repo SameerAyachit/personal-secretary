@@ -24,7 +24,7 @@ def create(
         "VALUES(?,?,?,?,?,'unacknowledged',?)",
         (kind, reminder_id, title, body, payload_json, now),
     )
-    iid = int(cur.lastrowid)
+    iid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "inbox", iid, {"kind": kind})
     return iid
 

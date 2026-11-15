@@ -34,10 +34,10 @@ class Router:
                 seen.add(spec.name)
 
         for name, keywords in self._keywords.items():
-            spec = self.registry.get(name)
-            if spec is None or spec.name in seen:
+            routed = self.registry.get(name)
+            if routed is None or routed.name in seen:
                 continue
             if any(k in text for k in keywords):
-                chosen.append(spec)
-                seen.add(spec.name)
+                chosen.append(routed)
+                seen.add(routed.name)
         return chosen

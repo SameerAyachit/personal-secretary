@@ -12,7 +12,7 @@ def create(con: sqlite3.Connection, *, text: str, turn_id: str | None = None) ->
     cur = con.execute(
         "INSERT INTO notes(text, created_at, updated_at) VALUES(?,?,?)", (text, now, now)
     )
-    note_id = int(cur.lastrowid)
+    note_id = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "note", note_id, {"chars": len(text)})
     return note_id
 

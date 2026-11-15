@@ -17,6 +17,7 @@ os.environ.setdefault(
 
 import tiktoken
 
+_ENCODING: tiktoken.Encoding | None
 try:  # vendored encoding available offline and in the packaged app
     _ENCODING = tiktoken.get_encoding("cl100k_base")
 except Exception:

@@ -22,7 +22,7 @@ def create(
         "VALUES(?,?,?,'waiting',?,?)",
         (kind, summary, payload_json, now, expires_at),
     )
-    pid = int(cur.lastrowid)
+    pid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "pending_action", pid, {"kind": kind})
     return pid
 

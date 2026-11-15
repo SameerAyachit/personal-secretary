@@ -17,7 +17,7 @@ from pathlib import Path
 from .db import Connection
 
 
-def backup(source: Connection, dst: Path) -> None:
+def backup(source: Connection, dst: Path) -> Path:
     """Online backup of ``source`` to ``dst`` (never a file copy)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst_tmp = dst.with_suffix(dst.suffix + ".tmp")

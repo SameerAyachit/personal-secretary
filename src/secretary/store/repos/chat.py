@@ -28,6 +28,7 @@ def add_message(
             con.execute(
                 "INSERT INTO conversations(title, created_at) VALUES(?,?)", ("Chat", now)
             ).lastrowid
+            or 0
         )
     else:
         conv_id = conv[0]
@@ -36,4 +37,4 @@ def add_message(
         "VALUES(?,?,?,?,?)",
         (conv_id, role, content, turn_id, now),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)

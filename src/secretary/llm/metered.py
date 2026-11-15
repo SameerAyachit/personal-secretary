@@ -45,7 +45,7 @@ class MeteredClient:
         est = _estimate(messages, tools)
         if self._limiter is not None:
             await self._limiter.acquire(est, priority=self._priority)
-        resp = await self._client.chat(
+        resp: LLMResponse = await self._client.chat(
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,
@@ -60,4 +60,5 @@ class MeteredClient:
         return resp
 
     async def list_models(self) -> list[str]:
-        return await self._client.list_models()
+        models: list[str] = await self._client.list_models()
+        return models

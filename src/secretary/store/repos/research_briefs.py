@@ -13,7 +13,7 @@ def create(con: sqlite3.Connection, topic: str) -> int:
         "INSERT INTO research_briefs(topic, status, created_at) VALUES(?, 'running', ?)",
         (topic, now_utc()),
     )
-    return int(cur.lastrowid)
+    return int(cur.lastrowid or 0)
 
 
 def finish(

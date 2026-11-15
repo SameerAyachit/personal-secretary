@@ -32,7 +32,7 @@ def create(
         (title, start_at, end_at, tz, all_day, location, notes, google_event_id, etag, sync_state,
          series_id, recurrence_json, now, now),
     )
-    eid = int(cur.lastrowid)
+    eid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "event", eid, {"title": title})
     return eid
 

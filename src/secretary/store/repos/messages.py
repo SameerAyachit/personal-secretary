@@ -38,7 +38,7 @@ def create(
         (thread_id, from_addr, to_addrs, subject, body, received_at, is_read, source,
          google_message_id, reply_to_id, now, now),
     )
-    mid = int(cur.lastrowid)
+    mid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "message", mid, {"subject": subject})
     return mid
 

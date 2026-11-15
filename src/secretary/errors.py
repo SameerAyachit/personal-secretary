@@ -46,6 +46,8 @@ def install_excepthooks() -> None:
 
     def _thread_hook(args: threading.ExceptHookArgs) -> None:
         name = args.thread.name if args.thread is not None else "worker-thread"
+        if args.exc_value is None:
+            return
         _report(args.exc_type, args.exc_value, args.exc_traceback, name)
 
     sys.excepthook = _main_hook

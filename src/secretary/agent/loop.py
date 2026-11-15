@@ -184,7 +184,8 @@ async def _execute_call(
         # Tools with an fn (e.g. email_send) build the pending action themselves
         # so they can store a snapshot for payload re-verification at execution.
         if spec.fn is not None:
-            return spec.fn(conn, turn_id, args)
+            prepared: dict = spec.fn(conn, turn_id, args)
+            return prepared
         expires_at = (datetime.now(UTC) + timedelta(hours=load_config().pending_actions.default_ttl_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
         summary = f"{call.name}: {json.dumps(args)[:120]}"
         pa_repo.create(
@@ -205,9 +206,12 @@ async def _execute_call(
     if spec.fn is None:
         return {"error": f"tool {call.name} not implemented"}
     try:
+        result: dict
         if asyncio.iscoroutinefunction(spec.fn):
-            return await spec.fn(conn, turn_id, args)
-        return spec.fn(conn, turn_id, args)
+            result = await spec.fn(conn, turn_id, args)
+        else:
+            result = spec.fn(conn, turn_id, args)
+        return result
     except Exception as exc:
         # A failing tool must come back to the LLM as an error result, never
         # abort the whole turn (concern C-19).
@@ -231,7 +235,7 @@ async def run_turn(
     turn_id = ctx.get("turn_id") or "turn"
     guard_steps = 0
     start = time.monotonic()
-    seen_call_keys: list[str] = []
+    seen_call_keys: list[tuple[str, str]] = []
     recent_sigs: list[str] = []
     tool_ran = False
     nudged = False
@@ -246,15 +250,10 @@ async def run_turn(
     selected = router.select(user_text, ctx or {})
     logger.info("chat turn %s: started selected_tools=%s", turn_id,
                 [t.name for t in selected])
-    tool_schemas = [
-        _hide_tz(s)
-        for s in (
-            list(
-                {s["name"]: s for s in registry.schemas() if s["name"] in {t.name for t in selected}}.values()
-            )
-            or registry.schemas()
-        )
-    ]
+    selected_names = {t.name for t in selected}
+    all_schemas: list[dict] = registry.schemas()
+    chosen: list[dict] = [s for s in all_schemas if s["name"] in selected_names]
+    tool_schemas: list[dict] = [_hide_tz(s) for s in (chosen or all_schemas)]
 
     while True:
         guard_steps += 1

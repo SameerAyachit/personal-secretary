@@ -63,14 +63,15 @@ def normalize_text(text: str) -> str:
 SYNONYMS = _WHOLE_PHRASE_SYNONYMS  # public name (synonym → normalized phrase)
 
 
-def _parse(text: str, now: datetime, tz: str):
+def _parse(text: str, now: datetime, tz: str) -> datetime | None:
     # dateparser reads clock times ("9am") and day boundaries ("today") on the wall
     # clock of RELATIVE_BASE, so the base is the target zone's naive local time even
     # when the caller holds a UTC instant (see the note on _SETTINGS).
     if now.tzinfo is not None:
         now = now.astimezone(ZoneInfo(tz)).replace(tzinfo=None)
     settings = {**_SETTINGS, "RELATIVE_BASE": now}
-    return dateparser.parse(text, settings=settings)
+    parsed: datetime | None = dateparser.parse(text, settings=settings)
+    return parsed
 
 
 def parse_when(text: str, now: datetime, tz: str) -> datetime:

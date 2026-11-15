@@ -63,7 +63,7 @@ def normalize_response(
         )
 
     text = resp.text or ""
-    calls: list[ToolCall] = []
+    found: list[ToolCall] = []
     seen: set[tuple[str, str]] = set()
 
     for cand in _candidate_objects(text):
@@ -89,11 +89,11 @@ def normalize_response(
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            calls.append(ToolCall(call_id=call_id, name=name, args=args))
+            found.append(ToolCall(call_id=call_id, name=name, args=args))
 
     return LLMResponse(
         text=text,
-        tool_calls=calls,
+        tool_calls=found,
         usage=dict(resp.usage),
         headers=dict(resp.headers),
         model=resp.model,

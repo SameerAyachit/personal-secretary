@@ -25,7 +25,7 @@ def create(
         "VALUES(?,?,?,?,?,?,?)",
         (title, notes, due_at, due_tz, source, now, now),
     )
-    tid = int(cur.lastrowid)
+    tid = int(cur.lastrowid or 0)
     action_log(con, turn_id, "created", "task", tid, {"title": title})
     return tid
 
