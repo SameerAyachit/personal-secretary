@@ -43,7 +43,13 @@ def build_registry_and_router() -> tuple[tools_registry.Registry, Router]:
     router.route("web_search", ["search", "web"])
     router.route("event_create", ["event", "calendar", "meeting", "appointment"])
     router.route("event_update", ["event", "calendar", "meeting", "appointment", "reschedule", "move", "change"])
-    router.route("event_list", ["events", "calendar", "schedule", "agenda"])
+    # Read questions ("what meetings do I have", "am I busy") must always be offered the read
+    # tool; with only event_create in hand the model created an event instead (live eval query-6).
+    router.route(
+        "event_list",
+        ["event", "calendar", "schedule", "agenda", "meeting", "appointment", "busy",
+         "what's on", "whats on", "plate", "do i have"],
+    )
     router.route("plan_day", ["plan", "planning", "schedule", "free", "slot"])
     router.route("research_brief", ["research", "brief", "summarize"])
     router.route("check_claims", ["check", "claims", "verify", "source"])
