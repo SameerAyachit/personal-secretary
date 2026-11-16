@@ -40,6 +40,7 @@ quality = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
     "ui: tests that exercise the Qt UI (run with QT_QPA_PLATFORM=offscreen)",
 ]
