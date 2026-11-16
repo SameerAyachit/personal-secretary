@@ -18,6 +18,10 @@ class AmbiguousTime(Exception):
     """Raised when the time text cannot be parsed (plan §9.1)."""
 
 
+class AmbiguousClock(AmbiguousTime):
+    """A bare hour such as "at 5": morning or evening cannot be guessed (plan 9.2). Ask the user."""
+
+
 class PastTime(Exception):
     """Raised when the resolved time is not strictly in the future (plan §9.1)."""
 
@@ -63,6 +67,43 @@ def normalize_text(text: str) -> str:
 SYNONYMS = _WHOLE_PHRASE_SYNONYMS  # public name (synonym → normalized phrase)
 
 
+# "at 5" / "5": an hour with no minutes, no am/pm and no unit after it. dateparser reads such a
+# number as a day of the month ("at 5" -> the 5th) or ignores it ("tomorrow at 8" -> now).
+_AT_HOUR = re.compile(
+    r"\bat\s+(\d{1,2})\b"
+    r"(?!\s*(?::|\.\d|/|-|[ap]\.?m\b|h\b|hrs?\b|st\b|nd\b|rd\b|th\b"
+    r"|min|hour|sec|day|week|month))",
+    re.IGNORECASE,
+)
+_BARE_HOUR = re.compile(r"^\s*(\d{1,2})\s*$")
+_EVENING = re.compile(r"\b(?:tonight|evening|night|afternoon)\b", re.IGNORECASE)
+_MORNING = re.compile(r"\bmorning\b", re.IGNORECASE)
+
+
+def _clarify_clock(text: str) -> str:
+    """Make a bare hour explicit, or raise :class:`AmbiguousClock` when it cannot be known.
+
+    A 24-hour hour (13-23, 0) is a clock time; a daypart word ("tonight at 9", "tomorrow
+    morning at 8") decides am/pm; a plain 1-12 hour ("at 5") is ambiguous. Times with
+    minutes ("8:30"), an am/pm, a date or a duration are left alone.
+    """
+    match = _AT_HOUR.search(text) or _BARE_HOUR.match(text)
+    if match is None:
+        return text
+    hour = int(match.group(1))
+    if hour > 23:
+        return text  # not a clock time; the parser decides
+    if hour == 0 or hour >= 13:
+        return text[: match.start(1)] + f"{hour:02d}:00" + text[match.end(1) :]
+    if _MORNING.search(text):
+        suffix = "am"
+    elif _EVENING.search(text) and hour != 12:
+        suffix = "pm"
+    else:
+        raise AmbiguousClock(text)
+    return text[: match.end(1)] + suffix + text[match.end(1) :]
+
+
 def _parse(text: str, now: datetime, tz: str) -> datetime | None:
     # dateparser reads clock times ("9am") and day boundaries ("today") on the wall
     # clock of RELATIVE_BASE, so the base is the target zone's naive local time even
@@ -81,6 +122,7 @@ def parse_when(text: str, now: datetime, tz: str) -> datetime:
     event). Raises ``AmbiguousTime`` if unparseable.
     """
     zone = ZoneInfo(tz)
+    text = _clarify_clock(text)
     dt = _parse(text, now, tz)
     if dt is None:
         dt = _parse(normalize_text(text), now, tz)

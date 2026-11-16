@@ -8,7 +8,7 @@ is what the user may be shown when the turn has to stop.
 from __future__ import annotations
 
 from secretary.timeparse.recurrence import UnparseableRecurrence
-from secretary.timeparse.when import AmbiguousTime, PastTime
+from secretary.timeparse.when import AmbiguousClock, AmbiguousTime, PastTime
 
 
 def time_error(exc: Exception, when_text: str) -> dict:
@@ -23,6 +23,18 @@ def time_error(exc: Exception, when_text: str) -> dict:
             "user_message": (
                 f"That time ({when_text}) has already passed today. "
                 "Tell me which day you mean, for example 'tomorrow at 4pm'."
+            ),
+        }
+    if isinstance(exc, AmbiguousClock):
+        return {
+            "error": (
+                f"'{when_text}' has an hour but no am/pm, so it could be morning or evening. "
+                "Do not guess: ask the user 'AM or PM?' and call no tool, or call again with "
+                "am/pm included, for example '5pm'."
+            ),
+            "user_message": (
+                f"Did you mean {when_text} in the morning (AM) or in the evening (PM)? "
+                "Tell me, for example 'at 5pm'."
             ),
         }
     if isinstance(exc, AmbiguousTime):
