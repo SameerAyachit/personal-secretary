@@ -1,7 +1,9 @@
 """Placeholder test so pytest runs on the empty package (P0-01)."""
 
+import re
+
 import secretary
 
 
 def test_package_imports():
-    assert secretary.__version__ == "0.1.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", secretary.__version__)  # the exact value is bump_version.py's job

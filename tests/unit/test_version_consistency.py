@@ -36,10 +36,11 @@ def test_set_version_rewrites_every_copy(tree):
 
 def test_set_version_keeps_line_endings_and_other_content(tree):
     before = (tree / "pyproject.toml").read_bytes()
+    current = bump.current_versions(tree)["pyproject.toml"].encode()
     bump.set_version("9.8.7", tree)
     after = (tree / "pyproject.toml").read_bytes()
     assert (b"\r\n" in before) == (b"\r\n" in after)
-    assert after.replace(b"9.8.7", b"0.1.0") == before  # only the version text changed
+    assert after.replace(b"9.8.7", current) == before  # only the version text changed
     assert len(after.splitlines()) == len(before.splitlines())
 
 
