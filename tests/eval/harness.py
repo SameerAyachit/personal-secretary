@@ -37,6 +37,7 @@ class EvalResult:
     got_args: dict = field(default_factory=dict)
     latency_ms: float = 0.0
     error: str = ""
+    reply: str = ""  # what the model said (live runs; used to judge cases with no tool call)
 
 
 def normalise_tool_call(resp: LLMResponse) -> dict | None:
@@ -50,6 +51,8 @@ def normalise_tool_call(resp: LLMResponse) -> dict | None:
 async def run_case(case, chat_fn: ChatFn) -> EvalResult:
     messages = [{"role": "user", "content": case.user_text}]
     start = time.monotonic()
+    if hasattr(chat_fn, "last_reply"):
+        chat_fn.last_reply = ""
     try:
         maybe = chat_fn(messages, None)
         if asyncio.iscoroutine(maybe):
@@ -57,7 +60,8 @@ async def run_case(case, chat_fn: ChatFn) -> EvalResult:
         else:
             tool_call = maybe
         latency_ms = (time.monotonic() - start) * 1000
-        passed = case.passes(tool_call)
+        reply = getattr(chat_fn, "last_reply", None)  # None: this runner does not capture text
+        passed = case.passes(tool_call, reply)
         return EvalResult(
             case_id=case.id,
             category=case.category,
@@ -67,6 +71,7 @@ async def run_case(case, chat_fn: ChatFn) -> EvalResult:
             got_tool=(tool_call or {}).get("name"),
             got_args=(tool_call or {}).get("args", {}) or {},
             latency_ms=latency_ms,
+            reply=reply or "",
         )
     except Exception as exc:
         latency_ms = (time.monotonic() - start) * 1000
@@ -135,13 +140,16 @@ def generate_report(results: list[EvalResult], model: str = "fake") -> str:
     lines += [
         "",
         "## Case details",
-        "| ID | Category | Passed | Expected tool | Got tool | Error |",
-        "|---|---|---|---|---|---|",
+        "| ID | Category | Passed | Expected tool | Got tool | Reply when no tool | Error |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in results:
+        reply = "—"
+        if not r.got_tool and r.reply:
+            reply = " ".join(r.reply.split()).replace("|", "/")[:140]
         lines.append(
             f"| {r.case_id} | {r.category} | {'YES' if r.passed else 'no'} | "
-            f"{r.expected_tool or '—'} | {r.got_tool or '—'} | {r.error or '—'} |"
+            f"{r.expected_tool or '—'} | {r.got_tool or '—'} | {reply} | {r.error or '—'} |"
         )
     return "\n".join(lines) + "\n"
 

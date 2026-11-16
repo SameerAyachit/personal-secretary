@@ -33,3 +33,14 @@ The key is read from Credential Manager and never printed or logged.
 
 Record the chosen model and rate in `docs/decisions_log.md` and add a dated ADR if the
 default model changes. Do not change defaults before you have a report.
+
+## Cases with no tool call (added 2026-11-16)
+The runner is single-shot: one model call, nothing is executed. For cases where the model calls
+no tool (must-ask, confirm-class, no-tool) the report has a "Reply when no tool" column with
+what the model said, so a failure can be judged. Scoring: a must-ask case passes only if the
+model asked a question and changed nothing (a read-only `task_list` lookup is allowed for
+"delete that task"); `confirm-1` ("send the draft to Ravi") passes on a draft/search call or a
+question and fails if the reply claims the mail was sent.
+
+Known limit of the single-shot view: tool errors are not fed back, so a case that the real app
+would repair in a second step (for example a past time) is scored on the first call only.

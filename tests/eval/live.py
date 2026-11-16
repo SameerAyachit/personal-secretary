@@ -53,8 +53,10 @@ def make_chat_fn(llm, registry, router, cfg):
             purpose="tool",
         )
         resp = normalize_response(resp, allowed_tools={s["name"] for s in schemas})
+        chat_fn.last_reply = resp.text or ""  # judged by cases with no tool call (asks / claims)
         return normalise_tool_call(resp)
 
+    chat_fn.last_reply = ""
     return chat_fn
 
 
