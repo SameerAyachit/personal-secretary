@@ -69,7 +69,7 @@ powershell -File packaging\build.ps1 -Installer   # also builds the Inno Setup i
 Pushing a tag such as `v0.2.0` runs `.github/workflows/release.yml`: tests, build, `--diagnose`
 on the frozen exe, installer, SHA-256, and a **draft** GitHub Release for you to review and
 publish. Before tagging, bump the version in `pyproject.toml`, `src/secretary/__init__.py` and
-`packaging/version_info.txt`. Draft release notes: `docs/release_notes_draft.md`.
+`packaging/version_info.txt`. Draft release notes: `docs/release_notes_draft.md`. Step-by-step (soak, signing, demo GIF, tagging): `docs/release_howto.md`.
 
 ## Getting started
 

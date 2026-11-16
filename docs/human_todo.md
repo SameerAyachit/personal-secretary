@@ -27,3 +27,5 @@ Each item is HUMAN-GATED; the app must work without the LLM and without Google c
 12. Sign the installer if you want to avoid SmartScreen warnings.
 13. Bump the version (README "Building and releasing"), push the tag, review the draft Release and publish it. Edit the repository name in `[updates] repo` only if it differs from `SameerAyachit/personal-secretary`.
 14. Check the first GitHub Actions run of `ci.yml` (mypy scope and the `pip-audit` job could not be run locally) and `release.yml` on a throwaway tag.
+
+See `docs/release_howto.md` for the exact steps (soak, signing, demo GIF, version, tag, publish). The plaintext token and the placeholder Groq key (item 8) were deleted on 2026-11-16; `llm_api_key:gemini` was kept.
